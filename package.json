@@ -11,7 +11,7 @@
   "samples": [
     {
       "displayName": "Starter Pack",
-      "description": "Original prefabs and ScriptableObject assets for the package.",
+      "description": "Starter prefabs, assets, concrete piece definitions, and optional controller/UI/audio implementations.",
       "path": "Samples~"
     }
   ]

@@ -1,43 +1,31 @@
-# LOGIYGames SurvivalBuilding — Runtime refactor
+# LOGIYGames SurvivalBuilding
 
-This archive contains the refactored `Runtime/` source layer for **Unity 6000.6.4f1 (Unity 6.6)**.
-It is intended as a source overlay for the original package `com.logiygames.building-survival`.
+A modular, grid-based building system for Unity 6. The package separates reusable building mechanics from optional starter content and sample implementations.
 
-## Installation
+## Package layout
 
-1. Back up the original package.
-2. Replace its `Runtime/` folder and `Runtime.meta` with the corresponding entries from this archive.
-3. Replace `package.json` with the manifest from this archive.
-4. Keep the original `Samples~/` folder and project assets. Sample prefabs/assets were not changed and are deliberately not duplicated in this Runtime overlay.
-5. Re-open the project in Unity 6000.6.4f1 and let Unity reimport the package.
+- `Runtime/` — the core API and reusable building mechanics: grids, placement planning, piece/material contracts, build services, marker handling, and system events.
+- `Samples~/Scripts/` — optional sample implementations: floor, wall, stair and doorway definitions, a legacy-input controller, sample HUD/hint views, localized sample messages, and audio feedback.
+- `Samples~/Data/`, `Samples~/Prefabs/`, `Samples~/Materials/` — sample ScriptableObject assets, prefabs and materials.
 
-All `.meta` GUIDs for the original runtime C# scripts, the `Runtime` folder, the assembly definition and `package.json` have been retained so existing serialized references remain stable.
+The sample scripts compile in the separate `LOGIYGames.SurvivalBuilding.Samples` assembly, which references the core assembly. Core does not reference the sample assembly or any of its concrete piece types or presentation components.
 
-## Main changes
+## Importing the Starter Pack
 
-- Added XML documentation to the runtime classes and methods.
-- Refactored grid registration/unregistration to validate slots before mutating indexes.
-- Fixed slot cleanup so unregistering one piece cannot remove a slot entry owned by another piece.
-- Fixed the grid replacement lifecycle: replacing an occupied slot no longer destroys the grid that is being reused.
-- Centralized piece detachment and preserved Rigidbody physics settings for placed and falling pieces.
-- Corrected stair validation so an already occupied stair slot is rejected during preview and marker commits.
-- Corrected marker placement results to carry explicit failure reasons, including missing material prefabs.
-- Removed duplicate destroy-preview rendering and paired event subscriptions correctly.
-- Added null/configuration guards around planner, HUD, marker and hint workflows.
-- Fixed enum hotkey arithmetic in the sample input controller.
-- Kept the original serialized public field names and component class names.
+In Unity Package Manager, select **LOGIYGames SurvivalBuilding** and import the **Starter Pack** sample. The sample includes the scripts and assets used by the supplied prefabs.
 
-## Unity API baseline
+The example controller uses Unity's legacy `UnityEngine.Input` API. Projects using a different input backend can replace it with their own controller and call the public `BuildPlanner` API.
 
-The package manifest uses `unity: 6000.6` and `unityRelease: 4f1`.
-The code uses Unity 6 APIs such as `Rigidbody.linearVelocity` and `Object.FindAnyObjectByType<T>()`.
-The legacy `UnityEngine.Input` sample controller remains intentionally unchanged in its input backend; replace it with Input System actions only if the consuming project has chosen that package and input architecture.
+## Creating custom building pieces
 
-## Validation status
+Derive from `PieceDefinition` in your own assembly and implement the placement evaluation, validation, slot occupancy, and marker-generation contracts. Use `GetDependents` to describe support relationships. Override `IsSupportAnchor` for definitions that can anchor a structure (the sample floor definition uses ground contact).
 
-Source-level consistency checks are included in this delivery, but an actual Unity Editor import, compile and Play Mode test could not be run in this environment. The package depends on the external assembly GUID references retained in the original `.asmdef`.
+The planner reports optional presentation requests through events such as `PlacementHintRequested`, `DestroyHintRequested`, `MessageHintRequested`, and `HintHidden`. UI is not required by the core and can be implemented independently.
 
+## Unity version
+
+The package manifest targets Unity `6000.6`. Falling building fragments use Unity 6 rigidbody APIs such as `Rigidbody.linearVelocity`.
 
 ## Placement marker raycasts
 
-The sample marker prefabs use **trigger colliders**. The supplied `ExampleBuildController` therefore queries marker triggers explicitly with `QueryTriggerInteraction.Collide` before querying solid world geometry. Do not change this marker query to `Ignore`: wall, stair and supported-floor placement is resolved through `BuildMarker` hits. If you provide a custom input controller, make sure its raycast can hit trigger colliders and forwards the marker collider hit to `BuildPlanner.Tick`.
+The sample marker prefabs use **trigger colliders**. `ExampleBuildController` queries marker triggers explicitly with `QueryTriggerInteraction.Collide` before querying solid world geometry, then forwards the marker hit to `BuildPlanner.Tick`. A custom input controller must also allow trigger hits; using `QueryTriggerInteraction.Ignore` bypasses marker-based placement for walls, stairs, and supported floor locations.

@@ -10,11 +10,54 @@ namespace LOGIYGames.SurvivalBuilding
         public TMP_Text Label;
         public BuildMessages Messages;
         public CanvasGroup Group;
+        [SerializeField] private BuildPlanner planner;
 
         [SerializeField, Min(0f)] private float displayDuration = 1f;
         [SerializeField, Min(0f)] private float fadeDuration = 0.5f;
 
         private Coroutine _disappearCoroutine;
+
+        private BuildPlanner _subscribedPlanner;
+
+        private void OnEnable()
+        {
+            var activePlanner = planner != null ? planner : GetComponentInParent<BuildPlanner>();
+            Subscribe(activePlanner);
+        }
+
+        private void OnDisable()
+        {
+            Subscribe(null);
+        }
+
+        private void Subscribe(BuildPlanner planner)
+        {
+            if (_subscribedPlanner == planner)
+                return;
+
+            if (_subscribedPlanner != null)
+            {
+                _subscribedPlanner.PlacementHintRequested -= Show;
+                _subscribedPlanner.MessageHintRequested -= ShowPlacementMessage;
+                _subscribedPlanner.DestroyHintRequested -= ShowDestroyMessage;
+                _subscribedPlanner.HintHidden -= Hide;
+            }
+
+            _subscribedPlanner = planner;
+            if (_subscribedPlanner == null)
+                return;
+
+            _subscribedPlanner.PlacementHintRequested += Show;
+            _subscribedPlanner.MessageHintRequested += ShowPlacementMessage;
+            _subscribedPlanner.DestroyHintRequested += ShowDestroyMessage;
+            _subscribedPlanner.HintHidden += Hide;
+        }
+
+        private void ShowPlacementMessage(PlacementFailReason reason)
+            => ShowMessage(Messages != null ? Messages.For(reason) : reason.ToString());
+
+        private void ShowDestroyMessage(DestroyFailReason reason)
+            => ShowMessage(Messages != null ? Messages.ForDestroy(reason) : reason.ToString());
 
         /// <summary>Initializes the hint as hidden.</summary>
         private void Start()

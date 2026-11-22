@@ -1,0 +1,20 @@
+{
+    "name": "LOGIYGames.SurvivalBuilding.Samples",
+    "rootNamespace": "LOGIYGames.SurvivalBuilding",
+    "references": [
+        "LOGIYGames.SurvivalBuilding",
+        "GUID:168165235cc8c6744a13adadc88723a6",
+        "GUID:6055be8ebefd69e48b49212b09b47b2f",
+        "GUID:893abd5ee81be1e4ebdde35ab9f8eadb",
+        "GUID:abe6ef3e81d782746ba5f07ae0d2b913"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

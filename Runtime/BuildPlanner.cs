@@ -19,14 +19,23 @@ namespace LOGIYGames.SurvivalBuilding
         public GhostView Ghost;
         public MarkerManager Markers;
         public BuildCatalog Catalog;
-        public BuildHintView Hint;
         public BuildEvents Events;
-        /// <summary>Localized placement and destruction messages displayed by the hint view.</summary>
-        public BuildMessages Messages;
 
         [Header("State")]
         public PieceDefinition CurrentPiece;
         public MaterialDefinition CurrentMaterial;
+
+        /// <summary>Raised when a placement failure should be presented to the player.</summary>
+        public event Action<PlacementResult, PieceDefinition> PlacementHintRequested;
+
+        /// <summary>Raised when a shared placement message should be presented to the player.</summary>
+        public event Action<PlacementFailReason> MessageHintRequested;
+
+        /// <summary>Raised when a destruction failure should be presented to the player.</summary>
+        public event Action<DestroyFailReason> DestroyHintRequested;
+
+        /// <summary>Raised when any active hint should be hidden.</summary>
+        public event Action HintHidden;
 
         /// <summary>Raised whenever the current destroy target changes.</summary>
         public event Action<BuildPiece> DestroyTargetChanged;
@@ -117,7 +126,7 @@ namespace LOGIYGames.SurvivalBuilding
                 SetDestroyTarget(null);
                 Ghost?.RestoreHidden();
                 Ghost?.Hide();
-                Hint?.Hide();
+                HideHint();
                 Markers?.Clear();
                 LastPlacement = default;
                 LastTargetGrid = null;
@@ -156,6 +165,7 @@ namespace LOGIYGames.SurvivalBuilding
                 LastPlacement = default;
                 LastTargetGrid = null;
                 Ghost?.Hide();
+                HideHint();
                 return default;
             }
 
@@ -201,7 +211,7 @@ namespace LOGIYGames.SurvivalBuilding
             {
                 Ghost.Hide();
                 Markers?.RestoreAll();
-                Hint?.Hide();
+                HideHint();
                 LastPlacement = placement;
                 return placement;
             }
@@ -210,9 +220,9 @@ namespace LOGIYGames.SurvivalBuilding
             Markers?.SetVisibleNear(placement.Position, (Service.Settings != null ? Service.Settings.Cell : 2f) * 0.5f);
 
             if (!placement.Valid && placement.FailReason != PlacementFailReason.None)
-                Hint?.Show(placement, CurrentPiece);
+                PlacementHintRequested?.Invoke(placement, CurrentPiece);
             else
-                Hint?.Hide();
+                HideHint();
 
             LastPlacement = placement;
             return placement;
@@ -230,7 +240,7 @@ namespace LOGIYGames.SurvivalBuilding
             {
                 SetDestroyTarget(null);
                 Ghost?.Hide();
-                Hint?.Hide();
+                HideHint();
                 return;
             }
 
@@ -240,13 +250,10 @@ namespace LOGIYGames.SurvivalBuilding
 
             Ghost?.ShowDestroy(piece, canDestroy);
 
-            if (Hint == null)
-                return;
-
             if (!canDestroy)
-                Hint.ShowMessage(Messages != null ? Messages.ForDestroy(reason) : "Cannot remove this piece.");
+                DestroyHintRequested?.Invoke(reason);
             else
-                Hint.Hide();
+                HideHint();
         }
 
         /// <summary>Attempts to remove the currently highlighted piece in destroy mode.</summary>
@@ -267,6 +274,7 @@ namespace LOGIYGames.SurvivalBuilding
             Ghost?.RestoreHidden();
             Service.Remove(target);
             Ghost?.Hide();
+            HideHint();
             return true;
         }
 
@@ -280,7 +288,7 @@ namespace LOGIYGames.SurvivalBuilding
             SetDestroyTarget(null);
             LastPlacement = default;
             Ghost?.Hide();
-            Hint?.Hide();
+            HideHint();
 
             ForceSetMode(mode);
             RefreshMarkers();
@@ -298,7 +306,7 @@ namespace LOGIYGames.SurvivalBuilding
 
             SetDestroyTarget(null);
             Ghost?.Hide();
-            Hint?.Hide();
+            HideHint();
             Markers?.RestoreAll();
             LastPlacement = default;
             LastTargetGrid = null;
@@ -347,9 +355,7 @@ namespace LOGIYGames.SurvivalBuilding
             if (placement.Prefab == null)
             {
                 if (placement.FailReason == PlacementFailReason.NoMaterialVariant)
-                    Hint?.ShowMessage(Messages != null
-                        ? Messages.For(PlacementFailReason.NoMaterialVariant)
-                        : "No prefab is configured for this material.");
+                    MessageHintRequested?.Invoke(PlacementFailReason.NoMaterialVariant);
                 return false;
             }
 
@@ -357,12 +363,12 @@ namespace LOGIYGames.SurvivalBuilding
             {
                 Events?.RaiseRejected(CurrentPiece, CurrentMaterial, placement.Position);
                 if (placement.FailReason != PlacementFailReason.None)
-                    Hint?.Show(placement, CurrentPiece);
+                    PlacementHintRequested?.Invoke(placement, CurrentPiece);
                 return false;
             }
 
             Service.Commit(placement, CurrentPiece, CurrentMaterial);
-            Hint?.Hide();
+            HideHint();
 
             if (placement.TargetGrid == null)
                 Input.FirstYawAccum = 0f;
@@ -496,6 +502,9 @@ namespace LOGIYGames.SurvivalBuilding
                 }
             }
         }
+
+        /// <summary>Notifies optional presentation components that their active hint should be hidden.</summary>
+        private void HideHint() => HintHidden?.Invoke();
 
         /// <summary>Changes the mode without applying the public enabled-state guard.</summary>
         /// <param name="mode">Mode to activate.</param>
