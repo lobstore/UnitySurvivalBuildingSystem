@@ -9,3 +9,6 @@
 - Improved singleton/event subscription lifecycle and null handling.
 - Updated the sample controller's numeric hotkey conversion.
 - Preserved existing runtime `.meta` GUIDs.
+
+## Compatibility fix
+- Restored `BuildMode` as a dedicated public enum so `BuildEvents`, `BuildPlanner`, and input controllers resolve the mode type in the runtime assembly.
