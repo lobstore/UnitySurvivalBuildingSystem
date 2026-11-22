@@ -1,16 +1,17 @@
 {
   "name": "com.logiygames.building-survival",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "displayName": "LOGIYGames SurvivalBuilding",
   "author": {
     "name": "LOGIYGames"
   },
-  "description": "Система строительства Survival типа",
-  "unity": "2022.4",
+  "description": "Survival-style modular building system for Unity 6.6.",
+  "unity": "6000.6",
+  "unityRelease": "4f1",
   "samples": [
     {
       "displayName": "Starter Pack",
-      "description": "Префабы и ScriptableObject для работы пакета",
+      "description": "Original prefabs and ScriptableObject assets for the package.",
       "path": "Samples~"
     }
   ]

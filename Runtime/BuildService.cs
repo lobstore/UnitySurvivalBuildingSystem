@@ -1,175 +1,250 @@
-﻿using LOGIYGames.Extensions;
+using LOGIYGames.Extensions;
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
 namespace LOGIYGames.SurvivalBuilding
 {
+    /// <summary>
+    /// Owns building-grid lifecycle and performs the authoritative commit/removal operations.
+    /// Placement evaluation remains in piece definitions and the planner.
+    /// </summary>
     public class BuildService : MonoBehaviour
     {
-
         [Header("Refs")]
         public Transform GridParent;
         public GridSettings Settings = new GridSettings();
 
-        [Tooltip("Если включено — потерявшие опору части падают как физические обломки. Если выключено — сразу удаляются.")]
+        [Tooltip("If enabled, unsupported pieces become physical falling fragments.")]
         public bool EnablePhysicalDestruction = true;
 
+        /// <summary>Gets the grids currently managed by this service.</summary>
         public readonly List<BuildGrid> Grids = new();
 
-        public event System.Action OnChanged;
+        /// <summary>Raised after the registered building state changes.</summary>
+        public event Action OnChanged;
 
-        // lazy — не зависит от порядка инициализации
-        BuildEvents Events => BuildEvents.Instance;
+        private BuildEvents Events => BuildEvents.Instance;
 
-        // =========================================================
-        // Grid lifecycle
-        // =========================================================
-
+        /// <summary>
+        /// Creates and registers a grid using the current cell and level dimensions.
+        /// </summary>
+        /// <param name="origin">World-space position of the grid's anchor cell.</param>
+        /// <param name="rotation">World-space orientation of the grid.</param>
+        /// <returns>The newly registered grid.</returns>
         public BuildGrid CreateGrid(Vector3 origin, Quaternion rotation)
         {
-            var go = new GameObject("BuildingGrid");
-            if (GridParent != null) go.transform.SetParent(GridParent, false);
+            EnsureSettings();
 
-            var g = go.AddComponent<BuildGrid>();
-            g.Origin = origin;
-            g.Rotation = rotation;
-            g.Cell = Settings.Cell;
-            g.Level = Settings.Level;
-            Grids.Add(g);
-            return g;
+            var host = new GameObject("BuildingGrid");
+            if (GridParent != null)
+                host.transform.SetParent(GridParent, false);
+
+            var grid = host.AddComponent<BuildGrid>();
+            grid.Origin = origin;
+            grid.Rotation = rotation;
+            grid.Cell = Settings.Cell;
+            grid.Level = Settings.Level;
+            Grids.Add(grid);
+            return grid;
         }
 
-        public BuildGrid FindNearest(Vector3 world, float maxDist)
+        /// <summary>Finds the nearest managed grid whose bounds are within the supplied distance.</summary>
+        /// <param name="worldPosition">The query position in world space.</param>
+        /// <param name="maxDistance">Maximum accepted distance in world units.</param>
+        /// <returns>The nearest grid, or <see langword="null"/> when none is close enough.</returns>
+        public BuildGrid FindNearest(Vector3 worldPosition, float maxDistance)
         {
-            BuildGrid best = null; float bestD = maxDist;
-            foreach (var g in Grids)
+            BuildGrid best = null;
+            var bestDistance = Mathf.Max(0f, maxDistance);
+
+            foreach (var grid in Grids)
             {
-                if (g == null) continue;
-                float d = g.DistanceToBounds(world);
-                if (d < bestD) { bestD = d; best = g; }
+                if (grid == null)
+                    continue;
+
+                var distance = grid.DistanceToBounds(worldPosition);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = grid;
+                }
             }
+
             return best;
         }
 
-        // =========================================================
-        // Commit
-        // =========================================================
-
-        public BuildPiece Commit(PlacementResult p, PieceDefinition def, MaterialDefinition mat)
+        /// <summary>
+        /// Instantiates a validated placement, resolves occupied-slot replacements and registers the piece.
+        /// </summary>
+        /// <param name="placement">The validated placement result.</param>
+        /// <param name="definition">The definition of the piece being created.</param>
+        /// <param name="material">The material selected for the piece.</param>
+        /// <returns>The registered runtime piece.</returns>
+        /// <exception cref="ArgumentException">The placement is invalid or has no prefab.</exception>
+        /// <exception cref="ArgumentNullException">A required definition or material is missing.</exception>
+        public BuildPiece Commit(PlacementResult placement, PieceDefinition definition, MaterialDefinition material)
         {
-            var grid = p.TargetGrid;
-            if (grid == null) grid = CreateGrid(p.Position, p.Rotation);
+            if (definition == null)
+                throw new ArgumentNullException(nameof(definition));
+            if (material == null)
+                throw new ArgumentNullException(nameof(material));
+            if (!placement.Show || !placement.Valid || placement.Prefab == null)
+                throw new ArgumentException("Only a visible, valid placement with a prefab can be committed.", nameof(placement));
 
-            // Удалить всё, что занимает те же слоты (лестница вместо пола и т.п.)
-            var slots = new List<Slot>(def.GetSlots(p.Key));
+            var grid = placement.TargetGrid;
+            var createdGrid = grid == null;
+            if (createdGrid)
+                grid = CreateGrid(placement.Position, placement.Rotation);
+
+            var slots = new List<Slot>(definition.GetSlots(placement.Key));
+            var replaced = new HashSet<BuildPiece>();
+
+            // Gather first, then remove: a multi-slot piece can be encountered through several slots.
             foreach (var slot in slots)
-                if (grid.TryGetPieceAtSlot(slot, out var existing))
-                    Remove(existing);
+            {
+                if (grid.TryGetPieceAtSlot(slot, out var existing) && existing != null)
+                    replaced.Add(existing);
+            }
 
-            var go = Instantiate(p.Prefab, p.Position, p.Rotation, grid.transform);
-            var piece = go.GetOrAddComponent<BuildPiece>();
-            piece.Init(p.Key, grid, def, mat);
-            grid.Register(p.Key, piece, slots);
+            foreach (var existing in replaced)
+                RemoveInternal(existing, cleanupGrid: false, notifyChanged: false);
 
-            Events?.RaisePlaced(def, mat, p.Position);   // ← теперь звук/партиклы работают
+            var instance = Instantiate(placement.Prefab, placement.Position, placement.Rotation, grid.transform);
+            var piece = instance.GetOrAddComponent<BuildPiece>();
+            piece.Init(placement.Key, grid, definition, material);
+            grid.Register(placement.Key, piece, slots);
+
+            Events?.RaisePlaced(definition, material, placement.Position);
             OnChanged?.Invoke();
             return piece;
         }
 
-        // =========================================================
-        // Remove
-        // =========================================================
+        /// <summary>Removes a piece from its grid without running the orphan scan.</summary>
+        /// <param name="piece">The piece to remove.</param>
+        public void Remove(BuildPiece piece)
+        {
+            RemoveInternal(piece, cleanupGrid: true, notifyChanged: true);
+        }
 
-        public void Remove(BuildPiece piece) => RemoveInternal(piece);
-
+        /// <summary>
+        /// Removes a piece and converts any newly unsupported pieces into falling fragments or destroys them.
+        /// </summary>
+        /// <param name="piece">The piece whose removal may invalidate support relationships.</param>
         public void RemoveWithPhysics(BuildPiece piece)
         {
-            if (piece == null || piece.Grid == null) return;
-            var grid = piece.Grid;
+            if (piece == null || piece.Grid == null)
+                return;
 
-            RemoveInternal(piece);
+            var grid = piece.Grid;
+            RemoveInternal(piece, cleanupGrid: false, notifyChanged: false);
 
             var orphans = FindOrphanedPieces(grid);
             foreach (var orphan in orphans)
             {
-                if (orphan == null || orphan.Grid != grid) continue;
-                grid.Unregister(orphan.Key, orphan.Definition.GetSlots(orphan.Key));
+                if (orphan == null || orphan.Grid != grid)
+                    continue;
+
+                grid.Unregister(orphan.Key);
 
                 if (EnablePhysicalDestruction)
                 {
-                    ConvertToFalling(orphan);
+                    orphan.BeginFalling();
                     Events?.RaiseOrphaned(orphan);
                 }
                 else
                 {
+                    orphan.DetachFromGrid();
                     Events?.RaiseRemoved(orphan);
                     Destroy(orphan.gameObject);
                 }
             }
 
-            // после массового удаления обломков — почистить сетку, если она опустела
             CleanupGridIfEmpty(grid);
             OnChanged?.Invoke();
         }
 
-        void RemoveInternal(BuildPiece piece)
+        /// <summary>Removes a piece from grid indices and optionally cleans up the now-empty grid.</summary>
+        /// <param name="piece">The piece to unregister and destroy.</param>
+        /// <param name="cleanupGrid">Whether to destroy the grid if it becomes empty.</param>
+        /// <param name="notifyChanged">Whether to raise the service change event.</param>
+        private void RemoveInternal(BuildPiece piece, bool cleanupGrid, bool notifyChanged)
         {
-            if (piece == null || piece.Grid == null) return;
-            var grid = piece.Grid;
+            if (piece == null || piece.Grid == null)
+                return;
 
-            grid.Unregister(piece.Key, piece.Definition.GetSlots(piece.Key));
+            var grid = piece.Grid;
+            grid.Unregister(piece.Key);
+            piece.DetachFromGrid();
             Destroy(piece.gameObject);
 
-            CleanupGridIfEmpty(grid);
+            if (cleanupGrid)
+                CleanupGridIfEmpty(grid);
 
             Events?.RaiseRemoved(piece);
-            OnChanged?.Invoke();
+            if (notifyChanged)
+                OnChanged?.Invoke();
         }
 
-        void CleanupGridIfEmpty(BuildGrid grid)
+        /// <summary>Removes an empty grid from the service and schedules its GameObject for destruction.</summary>
+        /// <param name="grid">The grid to inspect.</param>
+        private void CleanupGridIfEmpty(BuildGrid grid)
         {
-            if (grid == null || grid.HasCells) return;
+            if (grid == null || grid.HasCells)
+                return;
+
             Grids.Remove(grid);
             Destroy(grid.gameObject);
         }
 
-        // =========================================================
-        // Orphan detection / falling
-        // =========================================================
-
-        HashSet<BuildPiece> FindOrphanedPieces(BuildGrid grid)
+        /// <summary>Finds all pieces that cannot be reached from a ground-supported floor.</summary>
+        /// <param name="grid">The grid to inspect.</param>
+        /// <returns>The set of unsupported pieces.</returns>
+        private HashSet<BuildPiece> FindOrphanedPieces(BuildGrid grid)
         {
-            var valid = new HashSet<BuildPiece>();
+            var supported = new HashSet<BuildPiece>();
             var queue = new Queue<BuildPiece>();
 
-            // якоря: полы на земле
-            foreach (var p in grid.Occupied.Values)
+            foreach (var piece in grid.Occupied.Values)
             {
-                if (p.Definition is FloorPiece fp && fp.IsOnGround(p.Key.Anchor, grid))
+                if (piece == null || piece.Definition == null)
+                    continue;
+
+                if (piece.Definition is FloorPiece floor && floor.IsOnGround(piece.Key.Anchor, grid))
                 {
-                    if (valid.Add(p)) queue.Enqueue(p);
+                    if (supported.Add(piece))
+                        queue.Enqueue(piece);
                 }
             }
 
             while (queue.Count > 0)
             {
-                var curr = queue.Dequeue();
-                foreach (var dep in curr.Definition.GetDependents(curr.Key, grid))
+                var current = queue.Dequeue();
+                foreach (var dependent in current.Definition.GetDependents(current.Key, grid))
                 {
-                    if (dep == null) continue;
-                    if (valid.Add(dep)) queue.Enqueue(dep);
+                    if (dependent != null && supported.Add(dependent))
+                        queue.Enqueue(dependent);
                 }
             }
 
             var orphans = new HashSet<BuildPiece>();
-            foreach (var p in grid.Occupied.Values)
-                if (!valid.Contains(p)) orphans.Add(p);
+            foreach (var piece in grid.Occupied.Values)
+            {
+                if (piece != null && !supported.Contains(piece))
+                    orphans.Add(piece);
+            }
+
             return orphans;
         }
 
-        void ConvertToFalling(BuildPiece piece)
+        /// <summary>Validates and repairs runtime grid dimensions before grid creation.</summary>
+        private void EnsureSettings()
         {
-            piece.BeginFalling();
+            if (Settings == null)
+                Settings = new GridSettings();
+
+            Settings.Cell = Mathf.Max(0.25f, Settings.Cell);
+            Settings.Level = Mathf.Max(0.25f, Settings.Level);
         }
     }
 }

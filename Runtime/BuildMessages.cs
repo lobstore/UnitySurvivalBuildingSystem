@@ -2,6 +2,7 @@ using UnityEngine;
 
 namespace LOGIYGames.SurvivalBuilding
 {
+    /// <summary>Localized display text for placement and destruction failure reasons.</summary>
     [CreateAssetMenu(menuName = "Building/Messages")]
     public class BuildMessages : ScriptableObject
     {
@@ -18,16 +19,24 @@ namespace LOGIYGames.SurvivalBuilding
         [TextArea] public string CannotDestroyFloorOnWall = "Нельзя удалить: на этой стене стоит пол";
         [TextArea] public string CannotDestroyFloorOnStair = "Нельзя удалить: над этой лестницей стоит пол";
         [TextArea] public string CannotDestroyOrphanFloor = "Нельзя удалить: соседний пол потеряет опору";
-        public string ForDestroy(DestroyFailReason r) => r switch
+
+        /// <summary>Resolves a localized message for a destruction failure.</summary>
+        /// <param name="reason">Reason why removal is blocked.</param>
+        /// <returns>Configured message, or <see langword="null"/> when no specialized message exists.</returns>
+        public string ForDestroy(DestroyFailReason reason) => reason switch
         {
             DestroyFailReason.HasStairOnFloor => CannotDestroyStairOnFloor,
             DestroyFailReason.HasWallOnFloor => CannotDestroyWallOnFloor,
             DestroyFailReason.HasFloorOnWall => CannotDestroyFloorOnWall,
             DestroyFailReason.HasFloorOnStair => CannotDestroyFloorOnStair,
             DestroyFailReason.WouldOrphanAdjacentFloor => CannotDestroyOrphanFloor,
-            _ => null,
+            _ => CannotDestroy,
         };
-        public string For(PlacementFailReason r) => r switch
+
+        /// <summary>Resolves a localized message for a placement failure.</summary>
+        /// <param name="reason">Reason why the placement is invalid.</param>
+        /// <returns>Configured message, or <see langword="null"/> when the reason is None.</returns>
+        public string For(PlacementFailReason reason) => reason switch
         {
             PlacementFailReason.WrongSurface => WrongSurface,
             PlacementFailReason.SlotOccupied => SlotOccupied,
@@ -38,13 +47,21 @@ namespace LOGIYGames.SurvivalBuilding
             PlacementFailReason.CantileverTooFar => CantileverTooFar,
             _ => null,
         };
-        public string For(PieceDefinition def, PlacementFailReason r)
+
+        /// <summary>Resolves a placement failure, preferring custom surface text on the definition.</summary>
+        /// <param name="definition">Piece definition that evaluated the placement.</param>
+        /// <param name="reason">Reason why the placement is invalid.</param>
+        /// <returns>Piece-specific surface text or the shared message for the failure reason.</returns>
+        public string For(PieceDefinition definition, PlacementFailReason reason)
         {
-            if (r == PlacementFailReason.WrongSurface
-                && def != null
-                && !string.IsNullOrEmpty(def.SurfaceRequirementText))
-                return def.SurfaceRequirementText;
-            return For(r);
+            if (reason == PlacementFailReason.WrongSurface
+                && definition != null
+                && !string.IsNullOrEmpty(definition.SurfaceRequirementText))
+            {
+                return definition.SurfaceRequirementText;
+            }
+
+            return For(reason);
         }
     }
 }

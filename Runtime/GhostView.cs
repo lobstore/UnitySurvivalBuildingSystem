@@ -1,149 +1,204 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 namespace LOGIYGames.SurvivalBuilding
 {
+    /// <summary>
+    /// Manages the placement ghost and temporary destroy highlight.
+    /// The original piece renderer is disabled only while its destroy ghost is visible.
+    /// </summary>
     public class GhostView : MonoBehaviour
     {
         [Header("Tint")]
         public bool TintGhost = true;
-        public Color ValidColor = new Color(0.3f, 0.85f, 1f, 0.35f);
-        public Color InvalidColor = new Color(1f, 0.25f, 0.35f, 0.35f);
+        public Color ValidColor = new(0.3f, 0.85f, 1f, 0.35f);
+        public Color InvalidColor = new(1f, 0.25f, 0.35f, 0.35f);
         public bool UsePropertyBlock = true;
 
         [Header("Destroy")]
-        public Color DestroyTargetColor = new Color(1f, 0.6f, 0.2f, 0.5f);
+        public Color DestroyTargetColor = new(1f, 0.6f, 0.2f, 0.5f);
 
-        GameObject ghost;
-        GameObject ghostPrefab;
-        BuildPiece hiddenOriginal;
+        private GameObject _ghost;
+        private GameObject _ghostPrefab;
+        private BuildPiece _hiddenOriginal;
+        private bool _lastValid;
+        private bool _hasLastValid;
+        private MaterialPropertyBlock _propertyBlock;
 
-        bool lastValid;
-        bool hasLastValid;
+        private static readonly int ColorId = Shader.PropertyToID("_Color");
+        private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
 
-        static readonly int ColorId = Shader.PropertyToID("_Color");
-        static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
-
-        // =========================================================
-        // Build-ghost
-        // =========================================================
-        public void Show(PlacementResult p)
+        /// <summary>Displays or updates the placement ghost for the supplied result.</summary>
+        /// <param name="placement">Placement preview result.</param>
+        public void Show(PlacementResult placement)
         {
-            if (!p.Show || p.GhostPrefab == null) { Hide(); return; }
-
-            bool samePrefabAndPlace =
-                ghost != null
-                && ghostPrefab == p.GhostPrefab
-                && Vector3.SqrMagnitude(ghost.transform.position - p.Position) < 0.0001f
-                && Quaternion.Angle(ghost.transform.rotation, p.Rotation) < 0.1f;
-
-            if (samePrefabAndPlace)
+            if (!placement.Show || placement.GhostPrefab == null)
             {
-                RestoreHidden();   // no-op если ничего не скрывали
-                if (TintGhost && (!hasLastValid || lastValid != p.Valid))
-                    ApplyTint(p.Valid ? ValidColor : InvalidColor);
-                lastValid = p.Valid;
-                hasLastValid = true;
+                Hide();
+                return;
+            }
+
+            var samePreview = _ghost != null
+                && _ghostPrefab == placement.GhostPrefab
+                && Vector3.SqrMagnitude(_ghost.transform.position - placement.Position) < 0.0001f
+                && Quaternion.Angle(_ghost.transform.rotation, placement.Rotation) < 0.1f;
+
+            if (samePreview)
+            {
+                RestoreHidden();
+                if (TintGhost && (!_hasLastValid || _lastValid != placement.Valid))
+                    ApplyTint(placement.Valid ? ValidColor : InvalidColor);
+
+                _lastValid = placement.Valid;
+                _hasLastValid = true;
                 return;
             }
 
             RestoreHidden();
             DestroyGhost();
 
-            ghost = Instantiate(p.GhostPrefab);
-            ghostPrefab = p.GhostPrefab;
-            foreach (var c in ghost.GetComponentsInChildren<Collider>()) c.enabled = false;
-            ghost.transform.SetPositionAndRotation(p.Position, p.Rotation);
+            _ghost = Instantiate(placement.GhostPrefab);
+            _ghostPrefab = placement.GhostPrefab;
+            DisableColliders(_ghost);
+            _ghost.transform.SetPositionAndRotation(placement.Position, placement.Rotation);
 
-            if (TintGhost) ApplyTint(p.Valid ? ValidColor : InvalidColor);
-            lastValid = p.Valid;
-            hasLastValid = true;
+            if (TintGhost)
+                ApplyTint(placement.Valid ? ValidColor : InvalidColor);
+
+            _lastValid = placement.Valid;
+            _hasLastValid = true;
         }
 
-        // =========================================================
-        // Destroy-ghost (логика та же, кэш не нужен — смена цели редкая)
-        // =========================================================
+        /// <summary>Displays a ghost over a piece being targeted in destroy mode.</summary>
+        /// <param name="piece">Piece to highlight.</param>
+        /// <param name="canDestroy">Whether the piece can currently be removed.</param>
         public void ShowDestroy(BuildPiece piece, bool canDestroy)
         {
-            if (piece == null) { Hide(); return; }
-            if (hiddenOriginal == piece && ghost != null)
+            if (piece == null)
             {
-                if (TintGhost) ApplyTint(canDestroy ? DestroyTargetColor : InvalidColor);
+                Hide();
+                return;
+            }
+
+            if (_hiddenOriginal == piece && _ghost != null)
+            {
+                if (TintGhost)
+                    ApplyTint(canDestroy ? DestroyTargetColor : InvalidColor);
                 return;
             }
 
             RestoreHidden();
             DestroyGhost();
 
-            var prefab = piece.Definition.GetGhostPrefab(piece.Material);
-            if (prefab == null) { Hide(); return; }
+            var prefab = piece.Definition != null
+                ? piece.Definition.GetGhostPrefab(piece.Material)
+                : null;
 
-            ghost = Instantiate(prefab);
-            ghostPrefab = prefab;
-            foreach (var c in ghost.GetComponentsInChildren<Collider>()) c.enabled = false;
-            ghost.transform.SetPositionAndRotation(piece.transform.position, piece.transform.rotation);
+            if (prefab == null)
+            {
+                Hide();
+                return;
+            }
 
-            hiddenOriginal = piece;
+            _ghost = Instantiate(prefab);
+            _ghostPrefab = prefab;
+            DisableColliders(_ghost);
+            _ghost.transform.SetPositionAndRotation(piece.transform.position, piece.transform.rotation);
+
+            _hiddenOriginal = piece;
             SetRenderersEnabled(piece, false);
 
-            if (TintGhost) ApplyTint(canDestroy ? DestroyTargetColor : InvalidColor);
+            if (TintGhost)
+                ApplyTint(canDestroy ? DestroyTargetColor : InvalidColor);
 
-            hasLastValid = false;   // сбрасываем кэш валидности — режим другой
+            _hasLastValid = false;
         }
 
-        // =========================================================
-        // State
-        // =========================================================
+        /// <summary>Restores hidden renderers, destroys the current ghost and clears preview cache state.</summary>
         public void Hide()
         {
             RestoreHidden();
             DestroyGhost();
-            hasLastValid = false;
+            _hasLastValid = false;
         }
 
+        /// <summary>Restores renderers on the original piece previously hidden for destroy preview.</summary>
         public void RestoreHidden()
         {
-            if (hiddenOriginal != null)
+            if (_hiddenOriginal == null)
+                return;
+
+            SetRenderersEnabled(_hiddenOriginal, true);
+            _hiddenOriginal = null;
+        }
+
+        /// <summary>Destroys the generated ghost GameObject and clears its prefab reference.</summary>
+        private void DestroyGhost()
+        {
+            if (_ghost != null)
+                Destroy(_ghost);
+
+            _ghost = null;
+            _ghostPrefab = null;
+        }
+
+        /// <summary>Disables all colliders in a generated ghost hierarchy.</summary>
+        /// <param name="ghost">Ghost object to update.</param>
+        private static void DisableColliders(GameObject ghost)
+        {
+            foreach (var collider in ghost.GetComponentsInChildren<Collider>(true))
+                collider.enabled = false;
+        }
+
+        /// <summary>Enables or disables all renderers in a component's hierarchy.</summary>
+        /// <param name="component">Root component.</param>
+        /// <param name="enabled">Desired renderer state.</param>
+        private static void SetRenderersEnabled(Component component, bool enabled)
+        {
+            foreach (var renderer in component.GetComponentsInChildren<Renderer>(true))
             {
-                SetRenderersEnabled(hiddenOriginal, true);
-                hiddenOriginal = null;
+                if (renderer != null)
+                    renderer.enabled = enabled;
             }
         }
 
-        void DestroyGhost()
+        /// <summary>Applies the specified tint without creating per-renderer material instances when possible.</summary>
+        /// <param name="color">Tint color.</param>
+        private void ApplyTint(Color color)
         {
-            if (ghost) Destroy(ghost);
-            ghost = null;
-            ghostPrefab = null;
-        }
-
-        static void SetRenderersEnabled(Component c, bool enabled)
-        {
-            foreach (var r in c.GetComponentsInChildren<Renderer>()) r.enabled = enabled;
-        }
-
-        void ApplyTint(Color color)
-        {
-            if (ghost == null) return;
+            if (_ghost == null)
+                return;
 
             if (UsePropertyBlock)
             {
-                var block = new MaterialPropertyBlock();
-                foreach (var r in ghost.GetComponentsInChildren<Renderer>())
+                _propertyBlock ??= new MaterialPropertyBlock();
+
+                foreach (var renderer in _ghost.GetComponentsInChildren<Renderer>(true))
                 {
-                    r.GetPropertyBlock(block);
-                    block.SetColor(ColorId, color);
-                    block.SetColor(BaseColorId, color);
-                    r.SetPropertyBlock(block);
+                    if (renderer == null)
+                        continue;
+
+                    renderer.GetPropertyBlock(_propertyBlock);
+                    _propertyBlock.SetColor(ColorId, color);
+                    _propertyBlock.SetColor(BaseColorId, color);
+                    renderer.SetPropertyBlock(_propertyBlock);
                 }
+
+                return;
             }
-            else
+
+            foreach (var renderer in _ghost.GetComponentsInChildren<Renderer>(true))
             {
-                foreach (var r in ghost.GetComponentsInChildren<Renderer>())
-                {
-                    var mat = r.material;
-                    if (mat.HasProperty(ColorId)) mat.SetColor(ColorId, color);
-                    if (mat.HasProperty(BaseColorId)) mat.SetColor(BaseColorId, color);
-                }
+                if (renderer == null)
+                    continue;
+
+                var material = renderer.material;
+                if (material == null)
+                    continue;
+
+                if (material.HasProperty(ColorId))
+                    material.SetColor(ColorId, color);
+                if (material.HasProperty(BaseColorId))
+                    material.SetColor(BaseColorId, color);
             }
         }
     }

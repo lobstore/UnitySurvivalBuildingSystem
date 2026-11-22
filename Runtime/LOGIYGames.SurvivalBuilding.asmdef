@@ -1,6 +1,6 @@
 {
     "name": "LOGIYGames.SurvivalBuilding",
-    "rootNamespace": "",
+    "rootNamespace": "LOGIYGames.SurvivalBuilding",
     "references": [
         "GUID:168165235cc8c6744a13adadc88723a6",
         "GUID:6055be8ebefd69e48b49212b09b47b2f",

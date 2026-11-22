@@ -2,52 +2,47 @@ using UnityEngine;
 
 namespace LOGIYGames.SurvivalBuilding
 {
+    /// <summary>
+    /// Basic legacy-input sample controller for the building planner.
+    /// Projects the screen center into the world and forwards user actions to the planner.
+    /// </summary>
     public class ExampleBuildController : MonoBehaviour
     {
         [Header("Refs")]
         public Camera Cam;
         public BuildPlanner Planner;
         public BuildCatalog Catalog;
+
         [Header("Tuning")]
-        public float MaxDistance = 12f;
+        [Min(0f)] public float MaxDistance = 12f;
         public LayerMask RaycastLayers = ~0;
-        public bool BuildingEnabled => Planner.Enabled;
-        void Update()
+
+        /// <summary>Indicates whether the connected planner currently accepts building input.</summary>
+        public bool BuildingEnabled => Planner != null && Planner.Enabled;
+
+        private void Update()
         {
+            if (Planner == null)
+                return;
 
             if (Input.GetKeyDown(KeyCode.B))
                 Planner.SetEnabled(!Planner.Enabled);
-            if (Cam == null || Planner == null) return;
-            if (!Planner.Enabled)
-            {
-                // На случай, если флаг выключили напрямую — подстраховаться
-                // (SetEnabled должен был скрыть ghost и маркеры сам)
-                return;
-            }
-            // хоткей переключения режима
-            if (Input.GetKeyDown(KeyCode.X)) Planner.ToggleMode();
 
-            // выбор детали / материала — только в режиме Build
+            if (Cam == null || !Planner.Enabled)
+                return;
+
+            if (Input.GetKeyDown(KeyCode.X))
+                Planner.ToggleMode();
+
             if (Planner.Mode == BuildMode.Build)
             {
-                if (Catalog)
-                {
-                    for (int i = 0; i < Catalog.Pieces.Count && i < 9; i++)
-                        if (Input.GetKeyDown(KeyCode.Alpha1 + i))
-                            Planner.SetPiece(Catalog.Pieces[i]);
-                }
-
-                if (Input.GetKeyDown(KeyCode.Tab))
-                    Planner.NextMaterial((Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift)) ? -1 : 1);
-
-                float s = Input.mouseScrollDelta.y;
-                if (Mathf.Abs(s) > 0.01f) Planner.StepOrientation(s > 0 ? 1 : -1);
+                HandleBuildInput();
             }
 
-            // луч
-            Vector3 centerPoint = new Vector3(Screen.width / 2f, Screen.height / 2f, 0f);
-            var ray = Cam.ScreenPointToRay(centerPoint);
-            if (!Physics.Raycast(ray, out var hit, MaxDistance, RaycastLayers))
+            var screenCenter = new Vector3(Screen.width * 0.5f, Screen.height * 0.5f, 0f);
+            var ray = Cam.ScreenPointToRay(screenCenter);
+
+            if (!Physics.Raycast(ray, out var hit, MaxDistance, RaycastLayers, QueryTriggerInteraction.Ignore))
             {
                 Planner.ClearPreview();
                 return;
@@ -57,9 +52,36 @@ namespace LOGIYGames.SurvivalBuilding
 
             if (Input.GetMouseButtonDown(0))
             {
-                if (Planner.Mode == BuildMode.Destroy) Planner.TryDestroy();
-                else Planner.TryCommit();
+                if (Planner.Mode == BuildMode.Destroy)
+                    Planner.TryDestroy();
+                else
+                    Planner.TryCommit();
             }
+        }
+
+        /// <summary>Processes piece, material and orientation shortcuts while in build mode.</summary>
+        private void HandleBuildInput()
+        {
+            if (Catalog != null && Catalog.Pieces != null)
+            {
+                var hotkeyCount = Mathf.Min(Catalog.Pieces.Count, 9);
+                for (var index = 0; index < hotkeyCount; index++)
+                {
+                    var key = (KeyCode)((int)KeyCode.Alpha1 + index);
+                    if (Input.GetKeyDown(key))
+                        Planner.SetPiece(Catalog.Pieces[index]);
+                }
+            }
+
+            if (Input.GetKeyDown(KeyCode.Tab))
+            {
+                var backwards = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+                Planner.NextMaterial(backwards ? -1 : 1);
+            }
+
+            var scroll = Input.mouseScrollDelta.y;
+            if (Mathf.Abs(scroll) > 0.01f)
+                Planner.StepOrientation(scroll > 0f ? 1 : -1);
         }
     }
 }

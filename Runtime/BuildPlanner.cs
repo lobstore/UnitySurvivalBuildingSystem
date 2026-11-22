@@ -1,9 +1,13 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
+
 namespace LOGIYGames.SurvivalBuilding
 {
-    public enum BuildMode { Build, Destroy }
-
+    /// <summary>
+    /// Coordinates the placement preview, player selection and destruction workflow.
+    /// Input devices should call this class rather than manipulating grids directly.
+    /// </summary>
     [RequireComponent(typeof(BuildService))]
     [RequireComponent(typeof(GhostView))]
     [RequireComponent(typeof(MarkerManager))]
@@ -17,60 +21,105 @@ namespace LOGIYGames.SurvivalBuilding
         public BuildCatalog Catalog;
         public BuildHintView Hint;
         public BuildEvents Events;
-        public BuildMessages Messages;
+
         [Header("State")]
         public PieceDefinition CurrentPiece;
         public MaterialDefinition CurrentMaterial;
-        BuildMarker hiddenMarker;
-        public event System.Action<BuildPiece> DestroyTargetChanged;
+
+        /// <summary>Raised whenever the current destroy target changes.</summary>
+        public event Action<BuildPiece> DestroyTargetChanged;
+
+        /// <summary>Gets the currently active planner mode.</summary>
         public BuildMode Mode { get; private set; } = BuildMode.Build;
+
+        /// <summary>Gets whether building input and previews are currently enabled.</summary>
         public bool Enabled { get; private set; } = true;
-        public event System.Action<bool> EnabledChanged;
-        BuildPiece destroyTarget;
+
+        /// <summary>Raised whenever the enabled state changes.</summary>
+        public event Action<bool> EnabledChanged;
 
         [Header("Tuning")]
-        public float FirstRotStep = 90f;
-        public float GridAdoptionRadius = 3f;
+        [Min(0f)] public float FirstRotStep = 90f;
+        [Min(0f)] public float GridAdoptionRadius = 3f;
         public LayerMask BlockerLayers = 0;
-        public float FloorThickness = 0.1f;
-        public float WallThickness = 0.1f;
+        [Min(0f)] public float FloorThickness = 0.1f;
+        [Min(0f)] public float WallThickness = 0.1f;
+
         [Header("Cross-grid rules")]
-        [Tooltip("Запрещать ставить в XZ-колонку другой сетки (на любой высоте)")]
+        [Tooltip("Prevent building in an XZ column occupied by another grid.")]
         public bool PreventColumnOverlap = true;
 
-        [Tooltip("Сколько этажей НАД верхней частью чужой сетки разрешено строить в её колонке")]
+        [Tooltip("Number of levels allowed above the top of another grid.")]
         [Min(0)] public int AllowedLevelsAboveOtherGrid = 0;
 
-        [Tooltip("Сколько этажей ПОД нижней частью чужой сетки разрешено строить в её колонке")]
+        [Tooltip("Number of levels allowed below the bottom of another grid.")]
         [Min(0)] public int AllowedLevelsBelowOtherGrid = 0;
+
+        /// <summary>Per-piece rotation and first-grid orientation state.</summary>
         public readonly BuildInputState Input = new();
 
+        /// <summary>Gets the most recent evaluated placement result.</summary>
         public PlacementResult LastPlacement { get; private set; }
+
+        /// <summary>Gets the grid currently targeted by the placement preview.</summary>
         public BuildGrid LastTargetGrid { get; private set; }
 
-        void Start()
-        {
-            if (CurrentPiece == null && Catalog) CurrentPiece = Catalog.ByHotkey(0);
-            if (CurrentMaterial == null && Catalog) CurrentMaterial = Catalog.DefaultMaterial;
+        private BuildPiece _destroyTarget;
 
-            if (Service) Service.OnChanged += RefreshMarkers;
+        private void Reset()
+        {
+            ResolveReferences();
+        }
+
+        /// <summary>Resolves required component references before the planner starts.</summary>
+        private void Awake()
+        {
+            ResolveReferences();
+        }
+
+        /// <summary>Initializes default selections and subscribes to grid changes.</summary>
+        private void Start()
+        {
+            if (CurrentPiece == null && Catalog != null)
+                CurrentPiece = Catalog.ByHotkey(0);
+
+            if (CurrentMaterial == null && Catalog != null)
+                CurrentMaterial = Catalog.DefaultMaterial;
+
+            if (Service != null)
+                Service.OnChanged += RefreshMarkers;
+
             RefreshMarkers();
         }
+
+        /// <summary>Removes the grid change subscription when the planner is destroyed.</summary>
+        private void OnDestroy()
+        {
+            if (Service != null)
+                Service.OnChanged -= RefreshMarkers;
+        }
+
+        /// <summary>
+        /// Enables or disables the planner and clears transient preview state when disabled.
+        /// </summary>
+        /// <param name="isEnabled">New enabled state.</param>
         public void SetEnabled(bool isEnabled)
         {
-            if (Enabled == isEnabled) return;
+            if (Enabled == isEnabled)
+                return;
+
             Enabled = isEnabled;
 
             if (!isEnabled)
             {
-                destroyTarget = null;
-                Ghost.RestoreHidden();
-                Ghost.Hide();
-                if (Hint) Hint.Hide();
-                Markers.Clear();
+                SetDestroyTarget(null);
+                Ghost?.RestoreHidden();
+                Ghost?.Hide();
+                Hint?.Hide();
+                Markers?.Clear();
                 LastPlacement = default;
                 LastTargetGrid = null;
-                ForceSetMode(BuildMode.Build);       // ← не проверяет Enabled
+                ForceSetMode(BuildMode.Build);
             }
             else
             {
@@ -79,38 +128,56 @@ namespace LOGIYGames.SurvivalBuilding
 
             EnabledChanged?.Invoke(isEnabled);
         }
-        void ForceSetMode(BuildMode mode)
-        {
-            if (Mode == mode) return;
-            Mode = mode;
-            Events?.RaiseModeChanged(mode);
-        }
-        // =========================================================
-        // Основной вход: «есть точка в мире, есть луч, оцени»
+
+        /// <summary>
+        /// Evaluates the current ray hit and updates the placement or destruction preview.
+        /// </summary>
+        /// <param name="hit">Raycast result for the current cursor or crosshair position.</param>
+        /// <param name="observerPosition">World-space position of the camera or observing actor.</param>
+        /// <returns>The latest placement result, or a default result in destroy/disabled mode.</returns>
         public PlacementResult Tick(RaycastHit hit, Vector3 observerPosition)
         {
-            if (!Enabled) { Ghost.Hide(); return default; }
-            if (Mode == BuildMode.Destroy) { TickDestroy(hit); return default; }
+            if (!Enabled)
+            {
+                Ghost?.Hide();
+                return default;
+            }
 
-            var hitPiece = hit.collider ? hit.collider.GetComponentInParent<BuildPiece>() : null;
-            var hitMarker = hit.collider ? hit.collider.GetComponentInParent<BuildMarker>() : null;
+            if (Mode == BuildMode.Destroy)
+            {
+                TickDestroy(hit);
+                return default;
+            }
 
-            BuildGrid targetGrid =
-                hitPiece?.Grid ??
-                hitMarker?.Spot.Grid ??
-                Service.FindNearest(hit.point, GridAdoptionRadius);
+            if (CurrentPiece == null || Service == null || Ghost == null)
+            {
+                LastPlacement = default;
+                LastTargetGrid = null;
+                Ghost?.Hide();
+                return default;
+            }
+
+            var hitPiece = hit.collider != null
+                ? hit.collider.GetComponentInParent<BuildPiece>()
+                : null;
+            var hitMarker = hit.collider != null
+                ? hit.collider.GetComponentInParent<BuildMarker>()
+                : null;
+
+            var targetGrid = hitPiece?.Grid
+                ?? hitMarker?.Spot.Grid
+                ?? Service.FindNearest(hit.point, GridAdoptionRadius);
 
             LastTargetGrid = targetGrid;
 
-            PlacementResult p;
-
+            PlacementResult placement;
             if (hitMarker != null && hitMarker.Spot.Piece == CurrentPiece)
             {
-                p = CurrentPiece.FromMarker(hitMarker.Spot, CurrentMaterial, Input);
+                placement = CurrentPiece.FromMarker(hitMarker.Spot, CurrentMaterial, Input);
             }
             else
             {
-                var ctx = new PlacementContext
+                var context = new PlacementContext
                 {
                     Hit = hit,
                     HitPiece = hitPiece,
@@ -120,294 +187,343 @@ namespace LOGIYGames.SurvivalBuilding
                     Material = CurrentMaterial,
                     Input = Input,
                     FirstYaw = Input.FirstYawAccum,
-                    FloorThickness = FloorThickness,
+                    FloorThickness = FloorThickness
                 };
-                p = CurrentPiece.Evaluate(ctx, CurrentMaterial);
+
+                placement = CurrentPiece.Evaluate(context, CurrentMaterial);
             }
 
-            // ── BuildFallback больше нет ──
-            ValidateAgainstWorld(ref p, targetGrid);
+            ValidateAgainstWorld(ref placement, targetGrid);
 
-            if (!p.Show) { Ghost.Hide(); Markers.RestoreAll(); if (Hint) Hint.Hide(); return p; }
-
-            Ghost.Show(p);
-            Markers.SetVisibleNear(p.Position, Service.Settings.Cell * 0.5f);
-
-            if (Hint)
+            if (!placement.Show)
             {
-                if (!p.Valid && p.FailReason != PlacementFailReason.None) Hint.Show(p, CurrentPiece);
-                else Hint.Hide();
+                Ghost.Hide();
+                Markers?.RestoreAll();
+                Hint?.Hide();
+                LastPlacement = placement;
+                return placement;
             }
 
-            LastPlacement = p;
-            return p;
+            Ghost.Show(placement);
+            Markers?.SetVisibleNear(placement.Position, (Service.Settings != null ? Service.Settings.Cell : 2f) * 0.5f);
+
+            if (!placement.Valid && placement.FailReason != PlacementFailReason.None)
+                Hint?.Show(placement, CurrentPiece);
+            else
+                Hint?.Hide();
+
+            LastPlacement = placement;
+            return placement;
         }
 
-        void TickDestroy(RaycastHit hit)
+        /// <summary>Updates the selected piece and destroy preview for the current ray hit.</summary>
+        /// <param name="hit">Current physics raycast result.</param>
+        private void TickDestroy(RaycastHit hit)
         {
-            var buildedPiece = hit.collider ? hit.collider.GetComponentInParent<BuildPiece>() : null;
+            var piece = hit.collider != null
+                ? hit.collider.GetComponentInParent<BuildPiece>()
+                : null;
 
-            if (buildedPiece == null || !buildedPiece.IsInGrid)
+            if (piece == null || !piece.IsInGrid || piece.Definition == null)
             {
-                destroyTarget = null;
-                Ghost.Hide();
-                if (Hint) Hint.Hide();
+                SetDestroyTarget(null);
+                Ghost?.Hide();
+                Hint?.Hide();
                 return;
             }
 
-            destroyTarget = buildedPiece;
-            var reason = buildedPiece.Definition.CanBeDestroyed(buildedPiece.Key, buildedPiece.Grid);
-            bool canDestroy = reason == DestroyFailReason.None;
+            SetDestroyTarget(piece);
+            var reason = piece.Definition.CanBeDestroyed(piece.Key, piece.Grid);
+            var canDestroy = reason == DestroyFailReason.None;
 
-            var gprefab = buildedPiece.Definition.GetGhostPrefab(buildedPiece.Material);
-            var prefab = buildedPiece.Definition.GetPrefab(buildedPiece.Material);
+            Ghost?.ShowDestroy(piece, canDestroy);
 
-            Ghost.ShowDestroy(buildedPiece, canDestroy);
+            if (Hint == null)
+                return;
 
-            Ghost.ShowDestroy(buildedPiece, canDestroy);
-
-            // fallback if no messages for destroy
-            if (Hint)
-            {
-                if (!canDestroy) Hint.ShowMessage(Messages ? Messages.ForDestroy(reason) : "Нельзя удалить");
-                else Hint.Hide();
-            }
+            if (!canDestroy)
+                Hint.ShowMessage(Messages != null ? Messages.ForDestroy(reason) : "Cannot remove this piece.");
+            else
+                Hint.Hide();
         }
 
+        /// <summary>Attempts to remove the currently highlighted piece in destroy mode.</summary>
+        /// <returns><see langword="true"/> when the piece was removed.</returns>
         public bool TryDestroy()
         {
-            if (!Enabled) return false;
-            if (Mode != BuildMode.Destroy) return false;
-            if (destroyTarget == null) return false;
-
-            if (destroyTarget.Definition.CanBeDestroyed(destroyTarget.Key, destroyTarget.Grid) != DestroyFailReason.None)
+            if (!Enabled || Mode != BuildMode.Destroy || _destroyTarget == null
+                || !_destroyTarget.IsInGrid || Service == null)
                 return false;
 
-            var target = destroyTarget;
-            destroyTarget = null;
+            if (_destroyTarget.Definition == null
+                || _destroyTarget.Definition.CanBeDestroyed(_destroyTarget.Key, _destroyTarget.Grid) != DestroyFailReason.None)
+                return false;
 
-            Ghost.RestoreHidden();
-            Service.Remove(target);          // ← событие Removed поднимает сервис
-            Ghost.Hide();
+            var target = _destroyTarget;
+            SetDestroyTarget(null);
+
+            Ghost?.RestoreHidden();
+            Service.Remove(target);
+            Ghost?.Hide();
             return true;
         }
-        void HideMarker(BuildMarker m)
-        {
-            if (m == hiddenMarker) return;
-            RestoreMarker();
-            if (m != null) { m.SetVisible(false); hiddenMarker = m; }
-        }
 
-        void RestoreMarker()
-        {
-            if (hiddenMarker != null) hiddenMarker.SetVisible(true);
-            hiddenMarker = null;
-        }
+        /// <summary>Changes the active planner mode.</summary>
+        /// <param name="mode">Mode to activate.</param>
         public void SetMode(BuildMode mode)
         {
-            if (!Enabled || Mode == mode) return;
+            if (!Enabled || Mode == mode)
+                return;
 
-            destroyTarget = null;
-            Ghost.Hide();
-            if (Hint) Hint.Hide();
+            SetDestroyTarget(null);
+            LastPlacement = default;
+            Ghost?.Hide();
+            Hint?.Hide();
 
             ForceSetMode(mode);
             RefreshMarkers();
         }
+
+        /// <summary>Toggles between build mode and destroy mode.</summary>
         public void ToggleMode()
-        => SetMode(Mode == BuildMode.Build ? BuildMode.Destroy : BuildMode.Build);
-        // Не попали ни во что — скрыть всё
+            => SetMode(Mode == BuildMode.Build ? BuildMode.Destroy : BuildMode.Build);
+
+        /// <summary>Clears the active preview and restores all placement markers.</summary>
         public void ClearPreview()
         {
-            if (!Enabled) return;
-            destroyTarget = null;
-            Ghost.Hide();
-            if (Hint) Hint.Hide();
-            Markers.RestoreAll();          // ← ключевой фикс для «с маркера на воздух»
+            if (!Enabled)
+                return;
+
+            SetDestroyTarget(null);
+            Ghost?.Hide();
+            Hint?.Hide();
+            Markers?.RestoreAll();
             LastPlacement = default;
             LastTargetGrid = null;
         }
 
-        // =========================================================
-        // Действия, которые вызывает любой источник ввода
-        public void StepOrientation(int dir)
+        /// <summary>
+        /// Rotates the current definition or changes the initial yaw when no grid is targeted.
+        /// </summary>
+        /// <param name="direction">Positive or negative rotation direction; zero is ignored.</param>
+        public void StepOrientation(int direction)
         {
-            if (!Enabled || dir == 0) return;
+            if (!Enabled || direction == 0 || CurrentPiece == null)
+                return;
 
             if (LastTargetGrid == null)
-            {
-                // Нет сетки — крутим угол «первой плиты / fallback»
-                // для любого типа, а не только для пола
-                Input.FirstYawAccum += dir * FirstRotStep;
-            }
+                Input.FirstYawAccum += direction * FirstRotStep;
             else
-            {
-                // Сетка есть — деталь крутит себя по своим правилам
-                // (стена 180°, лестница/пол 90°)
-                CurrentPiece.OnScroll(dir, Input);
-            }
+                CurrentPiece.OnScroll(direction, Input);
+
+            LastPlacement = default;
+            Events?.RaiseOrientationChanged(CurrentPiece, Input.GetRot(CurrentPiece));
             RefreshMarkers();
         }
-        void RefreshMarkers()
+
+        /// <summary>Rebuilds placement markers for the selected piece and currently managed grids.</summary>
+        public void RefreshMarkers()
         {
-            var piece = (Enabled && Mode == BuildMode.Build) ? CurrentPiece : null;
-            Markers.Refresh(piece, Service.Grids);
+            if (Markers == null || Service == null)
+                return;
+
+            var definition = Enabled && Mode == BuildMode.Build ? CurrentPiece : null;
+            Markers.Refresh(definition, Service.Grids);
         }
+
+        /// <summary>
+        /// Commits the most recently evaluated placement if it is valid.
+        /// </summary>
+        /// <returns><see langword="true"/> when a piece was instantiated successfully.</returns>
         public bool TryCommit()
         {
-            if (!Enabled) return false;
+            if (!Enabled || Mode != BuildMode.Build || Service == null
+                || CurrentPiece == null || CurrentMaterial == null)
+                return false;
 
-            var p = LastPlacement;
-            if (p.Prefab == null) return false;
-
-            if (!p.Valid)
+            var placement = LastPlacement;
+            if (placement.Prefab == null)
             {
-                Events?.RaiseRejected(CurrentPiece, CurrentMaterial, p.Position);
-                if (Hint && p.FailReason != PlacementFailReason.None)
-                    Hint.Show(p, CurrentPiece);
+                if (placement.FailReason == PlacementFailReason.NoMaterialVariant)
+                    Hint?.ShowMessage(Messages != null
+                        ? Messages.For(PlacementFailReason.NoMaterialVariant)
+                        : "No prefab is configured for this material.");
                 return false;
             }
 
-            Service.Commit(p, CurrentPiece, CurrentMaterial);   // событие поднимет сервис
-            if (Hint) Hint.Hide();
-            if (LastTargetGrid == null) Input.FirstYawAccum = 0f;
+            if (!placement.Valid)
+            {
+                Events?.RaiseRejected(CurrentPiece, CurrentMaterial, placement.Position);
+                if (placement.FailReason != PlacementFailReason.None)
+                    Hint?.Show(placement, CurrentPiece);
+                return false;
+            }
+
+            Service.Commit(placement, CurrentPiece, CurrentMaterial);
+            Hint?.Hide();
+
+            if (placement.TargetGrid == null)
+                Input.FirstYawAccum = 0f;
+
+            LastPlacement = default;
             return true;
         }
 
-
+        /// <summary>Selects a new piece definition.</summary>
+        /// <param name="next">Definition to select.</param>
         public void SetPiece(PieceDefinition next)
         {
-            if (!Enabled || next == null || next == CurrentPiece) return;
+            if (!Enabled || next == null || next == CurrentPiece)
+                return;
+
             CurrentPiece = next;
+            LastPlacement = default;
             Events?.RaisePieceSelected(next);
-            RefreshMarkers();                 // было Markers.Refresh(CurrentPiece, ...)
+            RefreshMarkers();
         }
 
+        /// <summary>Selects a new material definition.</summary>
+        /// <param name="next">Material to select.</param>
         public void SetMaterial(MaterialDefinition next)
         {
-            if (!Enabled || next == null || next == CurrentMaterial) return;
+            if (!Enabled || next == null || next == CurrentMaterial)
+                return;
+
             CurrentMaterial = next;
+            LastPlacement = default;
             Events?.RaiseMaterialSelected(next);
-            RefreshMarkers();                 // было Markers.Refresh(CurrentPiece, ...)
+            RefreshMarkers();
         }
-        /// <summary>
-        /// Shift current material from catalog in cycle 
-        /// </summary>
-        /// <param name="dir"></param>
-        public void NextMaterial(int dir)
+
+        /// <summary>Moves the selected material through the catalog, wrapping at either end.</summary>
+        /// <param name="direction">Positive to move forward, negative to move backward.</param>
+        public void NextMaterial(int direction)
         {
-            if (!Catalog || Catalog.Materials.Count == 0) return;
-            int idx = Catalog.Materials.IndexOf(CurrentMaterial);
-            if (idx < 0) idx = 0;
-            idx = (idx + dir + Catalog.Materials.Count) % Catalog.Materials.Count;
-            SetMaterial(Catalog.Materials[idx]);
+            if (!Enabled || Catalog == null || Catalog.Materials == null || Catalog.Materials.Count == 0)
+                return;
+
+            var index = Catalog.Materials.IndexOf(CurrentMaterial);
+            if (index < 0)
+                index = 0;
+
+            var count = Catalog.Materials.Count;
+            index = ((index + direction) % count + count) % count;
+            SetMaterial(Catalog.Materials[index]);
         }
-        int SideFromWorld(BuildGrid grid, Vector3 worldDir)
+
+        /// <summary>Validates a placement against colliders and the occupied columns of other grids.</summary>
+        /// <param name="placement">Placement result to validate and update.</param>
+        /// <param name="ownGrid">The grid the placement belongs to, if any.</param>
+        private void ValidateAgainstWorld(ref PlacementResult placement, BuildGrid ownGrid)
         {
-            Vector3 l = Quaternion.Inverse(grid.Rotation) * worldDir;
-            l.y = 0f;
-            if (Mathf.Abs(l.x) > Mathf.Abs(l.z)) return l.x > 0 ? 1 : 3;
-            return l.z > 0 ? 0 : 2;
-        }
-        // =========================================================
+            if (!placement.Show || !placement.Valid || placement.Prefab == null || CurrentPiece == null || Service == null)
+                return;
 
-        void ValidateAgainstWorld(ref PlacementResult p, BuildGrid ownGrid)
-        {
-            if (!p.Show || !p.Valid || p.Prefab == null) return;
+            var cell = Mathf.Max(Service.Settings != null ? Service.Settings.Cell : 2f, 0.25f);
+            var level = Mathf.Max(Service.Settings != null ? Service.Settings.Level : 2f, 0.25f);
 
-            var def = FindPieceById(p.Key.PieceId);
-            if (def == null) return;
+            var bounds = CurrentPiece.GetLocalBounds(cell, level, WallThickness);
+            var center = placement.Position + placement.Rotation * bounds.center;
+            var hits = Physics.OverlapBox(center, bounds.extents, placement.Rotation, ~0,
+                QueryTriggerInteraction.Ignore);
 
-            float cell = Service.Settings.Cell > 0 ? Service.Settings.Cell : 2f;
-            float level = Service.Settings.Level > 0 ? Service.Settings.Level : 2f;
-
-            // ==========================================================
-            // 1) Физическое пересечение с коллайдерами / BlockerLayers
-            // ==========================================================
-            var b = def.GetLocalBounds(cell, level, WallThickness);
-            Vector3 center = p.Position + p.Rotation * b.center;
-
-            var hits = Physics.OverlapBox(center, b.extents, p.Rotation, ~0,
-                                          QueryTriggerInteraction.Ignore);
-
-            foreach (var c in hits)
+            foreach (var collider in hits)
             {
-                var bp = c.GetComponentInParent<BuildPiece>();
-                if (bp != null)
+                var existingPiece = collider.GetComponentInParent<BuildPiece>();
+                if (existingPiece != null)
                 {
-                    if (bp.Grid == null) continue;           // обломок — не препятствие
-                    if (bp.Grid == ownGrid) continue;         // своя сетка — не пересечение
-                    p.Valid = false;
-                    p.FailReason = PlacementFailReason.CrossesOtherGrid;
+                    if (existingPiece.Grid == null || existingPiece.Grid == ownGrid)
+                        continue;
+
+                    placement.Valid = false;
+                    placement.FailReason = PlacementFailReason.CrossesOtherGrid;
                     return;
                 }
 
-                if (c.GetComponentInParent<BuildMarker>() != null) continue;
+                if (collider.GetComponentInParent<BuildMarker>() != null)
+                    continue;
 
-                if ((BlockerLayers.value & (1 << c.gameObject.layer)) != 0)
+                if ((BlockerLayers.value & (1 << collider.gameObject.layer)) != 0)
                 {
-                    p.Valid = false;
-                    p.FailReason = PlacementFailReason.BlockedByWorld;
+                    placement.Valid = false;
+                    placement.FailReason = PlacementFailReason.BlockedByWorld;
                     return;
                 }
             }
 
-            // ==========================================================
-            // 2) Логическая проверка XZ-колонки
-            // ==========================================================
-            if (!PreventColumnOverlap) return;
+            if (!PreventColumnOverlap)
+                return;
 
-            // Все XZ-колонки, которые займёт новая деталь (в мировых координатах)
-            List<Vector3> worldCols = new();
+            var worldColumns = new List<Vector3>();
             if (ownGrid != null)
             {
-                foreach (var xz in def.GetOccupiedColumns(p.Key))
+                foreach (var column in CurrentPiece.GetOccupiedColumns(placement.Key))
                 {
-                    var cell3 = new Vector3Int(xz.x, p.Key.Anchor.y, xz.y);
-                    worldCols.Add(ownGrid.CellCenter(cell3));
+                    var cell3 = new Vector3Int(column.x, placement.Key.Anchor.y, column.y);
+                    worldColumns.Add(ownGrid.CellCenter(cell3));
                 }
             }
             else
             {
-                // Первая плита новой сетки — одна колонка в p.Position
-                worldCols.Add(p.Position);
+                worldColumns.Add(placement.Position);
             }
 
-            foreach (var other in Service.Grids)
+            foreach (var otherGrid in Service.Grids)
             {
-                if (other == null || other == ownGrid) continue;
-                if (other.Columns.Count == 0) continue;
+                if (otherGrid == null || otherGrid == ownGrid || otherGrid.Columns.Count == 0)
+                    continue;
 
-                foreach (var world in worldCols)
+                foreach (var worldPosition in worldColumns)
                 {
-                    var oc = other.WorldToCell(world);
-                    var col = new Vector2Int(oc.x, oc.z);
+                    var otherCell = otherGrid.WorldToCell(worldPosition);
+                    var column = new Vector2Int(otherCell.x, otherCell.z);
+                    if (!otherGrid.Columns.Contains(column))
+                        continue;
 
-                    if (!other.Columns.Contains(col)) continue;
+                    var aboveAllowed = AllowedLevelsAboveOtherGrid > 0
+                        && otherCell.y > otherGrid.MaxCell.y + (AllowedLevelsAboveOtherGrid - 1);
+                    var belowAllowed = AllowedLevelsBelowOtherGrid > 0
+                        && otherCell.y < otherGrid.MinCell.y - (AllowedLevelsBelowOtherGrid - 1);
 
-                    // Колонка занята чужой сеткой. Проверяем Y-запас.
-                    // aboveAllowed: деталь ВЫШЕ разрешённого «буфера» над сеткой
-                    // belowAllowed: деталь НИЖЕ разрешённого «буфера» под сеткой
-                    bool aboveAllowed = AllowedLevelsAboveOtherGrid > 0
-                        && oc.y > other.MaxCell.y + (AllowedLevelsAboveOtherGrid - 1);
+                    if (aboveAllowed || belowAllowed)
+                        continue;
 
-                    bool belowAllowed = AllowedLevelsBelowOtherGrid > 0
-                        && oc.y < other.MinCell.y - (AllowedLevelsBelowOtherGrid - 1);
-
-                    if (aboveAllowed || belowAllowed) continue;
-
-                    p.Valid = false;
-                    p.FailReason = PlacementFailReason.CrossesOtherGrid;
+                    placement.Valid = false;
+                    placement.FailReason = PlacementFailReason.CrossesOtherGrid;
                     return;
                 }
             }
         }
 
-        PieceDefinition FindPieceById(int id)
+        /// <summary>Changes the mode without applying the public enabled-state guard.</summary>
+        /// <param name="mode">Mode to activate.</param>
+        private void ForceSetMode(BuildMode mode)
         {
-            if (!Catalog) return null;
-            foreach (var p in Catalog.Pieces) if (p && p.PieceId == id) return p;
-            return null;
+            if (Mode == mode)
+                return;
+
+            Mode = mode;
+            Events?.RaiseModeChanged(mode);
+        }
+
+        /// <summary>Updates the current destroy target and notifies listeners only when it changes.</summary>
+        /// <param name="target">New target or <see langword="null"/>.</param>
+        private void SetDestroyTarget(BuildPiece target)
+        {
+            if (_destroyTarget == target)
+                return;
+
+            _destroyTarget = target;
+            DestroyTargetChanged?.Invoke(target);
+        }
+
+        /// <summary>Resolves required components from this GameObject when inspector references are empty.</summary>
+        private void ResolveReferences()
+        {
+            Service ??= GetComponent<BuildService>();
+            Ghost ??= GetComponent<GhostView>();
+            Markers ??= GetComponent<MarkerManager>();
+            Events ??= GetComponent<BuildEvents>();
         }
     }
 }

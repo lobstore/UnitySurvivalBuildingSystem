@@ -1,159 +1,212 @@
 using System.Collections.Generic;
 using UnityEngine;
+
 namespace LOGIYGames.SurvivalBuilding
 {
+    /// <summary>Wall placement, edge occupancy and vertical support rules.</summary>
     [CreateAssetMenu(menuName = "Building/Wall")]
     public class WallPiece : PieceDefinition
     {
+        /// <summary>Reserves the canonical edge represented by the wall's anchor and side variant.</summary>
+        /// <param name="key">Wall key.</param>
         public override IEnumerable<Slot> GetSlots(PieceKey key)
         {
             yield return Slot.Edge(key.Anchor, key.Variant);
         }
 
+        /// <summary>Returns the two upper floor cells that may be supported by this wall.</summary>
+        /// <param name="key">Wall key.</param>
         public override IEnumerable<Vector3Int> GetSupportedFloorCells(PieceKey key)
         {
-            yield return key.Anchor + new Vector3Int(0, 1, 0);
-            yield return key.Anchor + BuildGrid.SideOffset(key.Variant) + new Vector3Int(0, 1, 0);
+            yield return key.Anchor + Vector3Int.up;
+            yield return key.Anchor + BuildGrid.SideOffset(key.Variant) + Vector3Int.up;
         }
 
+        /// <summary>Checks edge vacancy and the existence of a floor or lower wall for support.</summary>
+        /// <param name="key">Candidate wall key.</param>
+        /// <param name="grid">Target grid.</param>
         public override bool ValidatePlacement(PieceKey key, BuildGrid grid)
+            => CheckPlacement(key, grid) == PlacementFailReason.None;
+
+        /// <summary>Returns the specific failure reason for a wall placement.</summary>
+        /// <param name="key">Candidate wall key.</param>
+        /// <param name="grid">Target grid.</param>
+        public override PlacementFailReason CheckPlacement(PieceKey key, BuildGrid grid)
         {
-            // слот уже занят?
-            if (grid.IsSlotOccupied(Slot.Edge(key.Anchor, key.Variant))) return false;
+            if (grid == null)
+                return PlacementFailReason.NoSupport;
 
-            // опора снизу: пол в клетке anchor
-            bool hasFloor = grid.TryGetPieceAtSlot(Slot.CellSlot(key.Anchor), out var floor)
-                         && floor.Definition is FloorPiece;
+            if (grid.IsSlotOccupied(Slot.Edge(key.Anchor, key.Variant)))
+                return PlacementFailReason.SlotOccupied;
 
-            // опора снизу: стена на том же ребре уровнем ниже
+            var hasFloor = grid.TryGetPieceAtSlot(Slot.CellSlot(key.Anchor), out var floor)
+                && floor.Definition is FloorPiece;
+
             var belowAnchor = key.Anchor + Vector3Int.down;
-            bool hasWall = grid.TryGetPieceAtSlot(Slot.Edge(belowAnchor, key.Variant), out var below)
-                        && below.Definition is WallPiece;
+            var hasLowerWall = grid.TryGetPieceAtSlot(Slot.Edge(belowAnchor, key.Variant), out var lowerWall)
+                && lowerWall.Definition is WallPiece;
 
-            return hasFloor || hasWall;
+            return hasFloor || hasLowerWall
+                ? PlacementFailReason.None
+                : PlacementFailReason.NoSupport;
         }
+
+        /// <summary>Enumerates horizontal columns touched by the wall's edge.</summary>
+        /// <param name="key">Wall key.</param>
         public override IEnumerable<Vector2Int> GetOccupiedColumns(PieceKey key)
         {
             yield return new Vector2Int(key.Anchor.x, key.Anchor.z);
-            var b = key.Anchor + BuildGrid.SideOffset(key.Variant);
-            yield return new Vector2Int(b.x, b.z);
+            var adjacent = key.Anchor + BuildGrid.SideOffset(key.Variant);
+            yield return new Vector2Int(adjacent.x, adjacent.z);
         }
+
+        /// <summary>
+        /// Creates marker candidates around existing floors and directly above existing walls.
+        /// </summary>
+        /// <param name="grid">Grid to inspect.</param>
         public override IEnumerable<MarkerSpot> GetMarkerSpots(BuildGrid grid)
         {
+            if (grid == null)
+                yield break;
+
             foreach (var piece in grid.Occupied.Values)
             {
-                // --- стены на полу ---
+                if (piece == null || piece.Definition == null)
+                    continue;
+
                 if (piece.Definition is FloorPiece)
                 {
                     var cell = piece.Key.Anchor;
-                    for (int s = 0; s < 4; s++)
+                    for (var side = 0; side < 4; side++)
                     {
-                        if (grid.IsSlotOccupied(Slot.Edge(cell, s))) continue;
+                        var key = new PieceKey(PieceId, cell, side);
+                        if (CheckPlacement(key, grid) != PlacementFailReason.None)
+                            continue;
 
                         yield return new MarkerSpot
                         {
                             Piece = this,
                             Grid = grid,
-                            Key = new PieceKey(PieceId, cell, s),
-                            Position = grid.EdgePoint(cell, s),
-                            Rotation = grid.Rotation * Quaternion.Euler(0f, s * 90f, 0f),
+                            Key = key,
+                            Position = grid.EdgePoint(cell, side),
+                            Rotation = grid.Rotation * Quaternion.Euler(0f, side * 90f, 0f)
                         };
                     }
                 }
-                // --- стены на стенах ---
                 else if (piece.Definition is WallPiece)
                 {
                     var above = piece.Key.Anchor + Vector3Int.up;
-                    int side = piece.Key.Variant;
-
-                    if (grid.IsSlotOccupied(Slot.Edge(above, side))) continue;
+                    var side = piece.Key.Variant;
+                    var key = new PieceKey(PieceId, above, side);
+                    if (CheckPlacement(key, grid) != PlacementFailReason.None)
+                        continue;
 
                     yield return new MarkerSpot
                     {
                         Piece = this,
                         Grid = grid,
-                        Key = new PieceKey(PieceId, above, side),
+                        Key = key,
                         Position = grid.EdgePoint(above, side),
-                        Rotation = grid.Rotation * Quaternion.Euler(0f, side * 90f, 0f),
+                        Rotation = grid.Rotation * Quaternion.Euler(0f, side * 90f, 0f)
                     };
                 }
             }
         }
 
-        public override PlacementResult Evaluate(PlacementContext ctx, MaterialDefinition mat)
+        /// <summary>Walls require a marker and do not snap directly to arbitrary collider hits.</summary>
+        /// <param name="context">Current placement context.</param>
+        /// <param name="material">Selected material.</param>
+        public override PlacementResult Evaluate(PlacementContext context, MaterialDefinition material)
         {
-            if (GetPrefab(mat) == null)
-                return new PlacementResult { Show = false, FailReason = PlacementFailReason.NoMaterialVariant };
+            if (GetPrefab(material) == null)
+            {
+                return new PlacementResult
+                {
+                    Show = true,
+                    Valid = false,
+                    FailReason = PlacementFailReason.NoMaterialVariant,
+                    Position = context.Hit.point
+                };
+            }
 
-            // Стена не снапится ни к чему, кроме маркера.
-            // Всё, что попало сюда, — свободный красный ghost.
-            return FreeInvalid(ctx, mat, PlacementFailReason.WrongSurface);
+            return FreeInvalid(context, material, PlacementFailReason.WrongSurface);
         }
-        PlacementFailReason ReasonFor(PieceKey key, BuildGrid grid)
-        {
-            if (grid.IsSlotOccupied(Slot.Edge(key.Anchor, key.Variant)))
-                return PlacementFailReason.SlotOccupied;
 
-            bool hasFloor = grid.TryGetPieceAtSlot(Slot.CellSlot(key.Anchor), out var floor)
-                         && floor.Definition is FloorPiece;
-
-            var belowAnchor = key.Anchor + Vector3Int.down;
-            bool hasWall = grid.TryGetPieceAtSlot(Slot.Edge(belowAnchor, key.Variant), out var below)
-                        && below.Definition is WallPiece;
-
-            if (!hasFloor && !hasWall) return PlacementFailReason.NoSupport;
-            return PlacementFailReason.None;
-        }
+        /// <summary>Rotates the wall by 180 degrees for each scroll step.</summary>
+        /// <param name="sign">Positive or negative scroll direction.</param>
+        /// <param name="state">Current orientation state.</param>
         public override void OnScroll(int sign, BuildInputState state)
         {
-            // 180°-поворот: +2 ≡ -2 (mod 4), но пишем симметрично — легче читать
-            state.SetRot(this, (state.GetRot(this) + (sign > 0 ? 2 : -2) + 4) & 3);
+            if (state == null || sign == 0)
+                return;
+
+            var delta = sign > 0 ? 2 : -2;
+            state.SetRot(this, (state.GetRot(this) + delta + 4) & 3);
         }
 
-        static int SideFromWorld(BuildGrid grid, Vector3 worldDir)
-            => grid.SideFromWorld(worldDir);   // ← и здесь, и в BuildPlanner
-
-
-        public override PlacementResult FromMarker(MarkerSpot spot, MaterialDefinition mat, BuildInputState input)
+        /// <summary>Builds the placement result for a wall marker.</summary>
+        /// <param name="spot">Candidate marker.</param>
+        /// <param name="material">Selected material.</param>
+        /// <param name="input">Current input state; wall markers define their own side.</param>
+        public override PlacementResult FromMarker(MarkerSpot spot, MaterialDefinition material, BuildInputState input)
         {
-            bool ok = ValidatePlacement(spot.Key, spot.Grid);
+            var prefab = GetPrefab(material);
+            var reason = prefab == null
+                ? PlacementFailReason.NoMaterialVariant
+                : CheckPlacement(spot.Key, spot.Grid);
+
             return new PlacementResult
             {
                 Show = true,
-                Valid = ok,
-                FailReason = ok ? PlacementFailReason.None : ReasonFor(spot.Key, spot.Grid),
+                Valid = reason == PlacementFailReason.None,
+                FailReason = reason,
                 Key = spot.Key,
                 Position = spot.Position,
                 Rotation = spot.Rotation,
                 TargetGrid = spot.Grid,
-                Prefab = GetPrefab(mat),
-                GhostPrefab = GetGhostPrefab(mat),
+                Prefab = prefab,
+                GhostPrefab = GetGhostPrefab(material)
             };
         }
+
+        /// <summary>Returns wall bounds used for collision/overlap validation.</summary>
+        /// <param name="cell">Horizontal grid cell size.</param>
+        /// <param name="level">Vertical grid level size.</param>
+        /// <param name="thickness">Wall thickness.</param>
         public override Bounds GetLocalBounds(float cell, float level, float thickness)
-        => new Bounds(Vector3.up * (level * 0.5f), new Vector3(cell, level, thickness));
+            => new Bounds(Vector3.up * (level * 0.5f), new Vector3(cell, level, thickness));
+
+        /// <summary>Prevents removing this wall when upper floors depend on it.</summary>
+        /// <param name="key">Wall key.</param>
+        /// <param name="grid">Owning grid.</param>
         public override DestroyFailReason CanBeDestroyed(PieceKey key, BuildGrid grid)
-        {
-            if (grid.WouldRemainSupported(key)) return DestroyFailReason.None;
-            return DestroyFailReason.HasFloorOnWall;
-        }
-        public override PlacementFailReason CheckPlacement(PieceKey key, BuildGrid grid)
-        => ReasonFor(key, grid);
+            => grid == null || grid.WouldRemainSupported(key)
+                ? DestroyFailReason.None
+                : DestroyFailReason.HasFloorOnWall;
+
+        /// <summary>Enumerates upper floors and the wall segment above that depend on this wall.</summary>
+        /// <param name="key">Wall key.</param>
+        /// <param name="grid">Owning grid.</param>
         public override IEnumerable<BuildPiece> GetDependents(PieceKey key, BuildGrid grid)
         {
-            // полы сверху (на клетках с обеих сторон ребра)
-            foreach (var above in GetSupportedFloorCells(key))
+            if (grid == null)
+                yield break;
+
+            foreach (var aboveFloor in GetSupportedFloorCells(key))
             {
-                if (grid.TryGetPieceAtSlot(Slot.CellSlot(above), out var p) && p.Definition is FloorPiece)
-                    yield return p;
+                if (grid.TryGetPieceAtSlot(Slot.CellSlot(aboveFloor), out var floor)
+                    && floor.Definition is FloorPiece)
+                {
+                    yield return floor;
+                }
             }
 
-            // стена сверху — на том же ребре уровнем выше
             var aboveAnchor = key.Anchor + Vector3Int.up;
-            if (grid.TryGetPieceAtSlot(Slot.Edge(aboveAnchor, key.Variant), out var wall)
-                && wall.Definition is WallPiece)
-                yield return wall;
+            if (grid.TryGetPieceAtSlot(Slot.Edge(aboveAnchor, key.Variant), out var upperWall)
+                && upperWall.Definition is WallPiece)
+            {
+                yield return upperWall;
+            }
         }
     }
-
 }
