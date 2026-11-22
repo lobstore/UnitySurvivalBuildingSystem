@@ -10,6 +10,7 @@ namespace LOGIYGames.SurvivalBuilding
         public TMP_Text Label;
         public BuildMessages Messages;
         public CanvasGroup Group;
+        [SerializeField] private BuildPlanner planner;
 
         [SerializeField, Min(0f)] private float displayDuration = 1f;
         [SerializeField, Min(0f)] private float fadeDuration = 0.5f;
@@ -20,8 +21,8 @@ namespace LOGIYGames.SurvivalBuilding
 
         private void OnEnable()
         {
-            var planner = GetComponentInParent<BuildPlanner>();
-            Subscribe(planner);
+            var activePlanner = planner != null ? planner : GetComponentInParent<BuildPlanner>();
+            Subscribe(activePlanner);
         }
 
         private void OnDisable()
