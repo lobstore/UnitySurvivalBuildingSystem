@@ -25,3 +25,7 @@ The planner reports optional presentation requests through events such as `Place
 ## Unity version
 
 The package manifest targets Unity `6000.6`. Falling building fragments use Unity 6 rigidbody APIs such as `Rigidbody.linearVelocity`.
+
+## Placement marker raycasts
+
+The sample marker prefabs use **trigger colliders**. `ExampleBuildController` queries marker triggers explicitly with `QueryTriggerInteraction.Collide` before querying solid world geometry, then forwards the marker hit to `BuildPlanner.Tick`. A custom input controller must also allow trigger hits; using `QueryTriggerInteraction.Ignore` bypasses marker-based placement for walls, stairs, and supported floor locations.
