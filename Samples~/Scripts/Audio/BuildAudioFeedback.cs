@@ -14,6 +14,7 @@ namespace LOGIYGames.SurvivalBuilding
         public SoundData PlaceWall;
         public SoundData PlaceStair;
         public SoundData PlaceDoorway;
+        public SoundData PlacePillar;
 
         [Header("Errors")]
         public SoundData Rejected;
@@ -93,6 +94,7 @@ namespace LOGIYGames.SurvivalBuilding
             var clip = definition switch
             {
                 DoorwayPiece => PlaceDoorway != null ? PlaceDoorway : PlaceWall,
+                PillarPiece => PlacePillar != null ? PlacePillar : PlaceFloor,
                 WallPiece => PlaceWall,
                 StairPiece => PlaceStair,
                 _ => PlaceFloor,

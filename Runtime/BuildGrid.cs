@@ -53,7 +53,8 @@ namespace LOGIYGames.SurvivalBuilding
     {
         Cell,
         Edge,
-        Stair
+        Stair,
+        Corner
     }
 
     /// <summary>
@@ -90,6 +91,23 @@ namespace LOGIYGames.SurvivalBuilding
             return Compare(anchor, adjacent) < 0
                 ? new Slot(SlotKind.Edge, anchor, side)
                 : new Slot(SlotKind.Edge, adjacent, (side + 2) & 3);
+        }
+
+        /// <summary>
+        /// Creates a canonical corner slot. Each of the four cells sharing a corner resolves to the same slot.
+        /// X and Z are stored in doubled cell coordinates so half-cell corners remain exact integers.
+        /// </summary>
+        /// <param name="anchor">One of the floor cells adjacent to the corner.</param>
+        /// <param name="corner">Corner between this side and the next clockwise side, normalized modulo four.</param>
+        public static Slot Corner(Vector3Int anchor, int corner)
+        {
+            var offset = BuildGrid.CornerOffset(corner);
+            var canonicalCorner = new Vector3Int(
+                anchor.x * 2 + Mathf.RoundToInt(offset.x * 2f),
+                anchor.y,
+                anchor.z * 2 + Mathf.RoundToInt(offset.z * 2f));
+
+            return new Slot(SlotKind.Corner, canonicalCorner, 0);
         }
 
         /// <inheritdoc/>
@@ -171,6 +189,12 @@ namespace LOGIYGames.SurvivalBuilding
         public Vector3 EdgePoint(Vector3Int cell, int side)
             => CellCenter(cell) + Rotation * (SideDir(side) * (Cell * 0.5f));
 
+        /// <summary>Gets the world-space position of a floor-cell corner.</summary>
+        /// <param name="cell">One of the floor cells adjacent to the corner.</param>
+        /// <param name="corner">Corner index from zero to three.</param>
+        public Vector3 CornerPoint(Vector3Int cell, int corner)
+            => CellCenter(cell) + Rotation * (CornerOffset(corner) * Cell);
+
         /// <summary>Converts a world-space point to the nearest grid cell.</summary>
         /// <param name="worldPosition">World-space position.</param>
         /// <returns>Nearest integer grid coordinate.</returns>
@@ -208,6 +232,11 @@ namespace LOGIYGames.SurvivalBuilding
             2 => Vector3.back,
             _ => Vector3.left
         };
+
+        /// <summary>Gets the local-space half-cell offset from a cell center to one of its four corners.</summary>
+        /// <param name="corner">Corner index from zero to three.</param>
+        public static Vector3 CornerOffset(int corner)
+            => (SideDir(corner) + SideDir((corner + 1) & 3)) * 0.5f;
 
         /// <summary>Gets the cell-coordinate offset for a grid side.</summary>
         /// <param name="side">Side index, normalized modulo four.</param>
@@ -477,6 +506,8 @@ namespace LOGIYGames.SurvivalBuilding
         HasFloorOnWall,
         HasFloorOnStair,
         WouldOrphanAdjacentFloor,
+        HasFloorOnPillar,
+        HasPillarOnFloor,
     }
 
     /// <summary>Reasons why a placement attempt is invalid.</summary>

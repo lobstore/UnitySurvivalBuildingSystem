@@ -43,3 +43,11 @@ Moved scripts retain their original `.meta` GUIDs. References from the supplied 
 ## Marker trigger raycasts
 
 Starter marker prefabs use trigger colliders. The sample controller queries them with `QueryTriggerInteraction.Collide` even when global trigger queries are disabled. A custom controller must do the same and pass the `BuildMarker` raycast hit to `BuildPlanner.Tick`.
+
+## Corner pillars
+
+- `Slot.Corner` provides one canonical slot for a corner regardless of which of the four surrounding floor cells is used to address it.
+- `PillarPiece` can only be placed when all four cells around a corner contain floor pieces.
+- A placed pillar offers floor placement in all four adjacent cells one level above.
+- Base floors depend on the pillar only while all four foundation tiles remain present. Removing one of those foundation floors is blocked while the pillar is attached.
+- Upper floors depend on the pillar in the support graph, so pillar removal and collapse prevention use the same support checks as walls.

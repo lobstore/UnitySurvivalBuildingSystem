@@ -19,6 +19,8 @@ namespace LOGIYGames.SurvivalBuilding
         [TextArea] public string CannotDestroyFloorOnWall = "Нельзя удалить: на этой стене стоит пол";
         [TextArea] public string CannotDestroyFloorOnStair = "Нельзя удалить: над этой лестницей стоит пол";
         [TextArea] public string CannotDestroyOrphanFloor = "Нельзя удалить: соседний пол потеряет опору";
+        [TextArea] public string CannotDestroyFloorOnPillar = "Нельзя удалить: на колонне есть пол";
+        [TextArea] public string CannotDestroyPillarOnFloor = "Нельзя удалить: на пересечении стоит колонна";
 
         /// <summary>Resolves a localized message for a destruction failure.</summary>
         /// <param name="reason">Reason why removal is blocked.</param>
@@ -30,6 +32,8 @@ namespace LOGIYGames.SurvivalBuilding
             DestroyFailReason.HasFloorOnWall => CannotDestroyFloorOnWall,
             DestroyFailReason.HasFloorOnStair => CannotDestroyFloorOnStair,
             DestroyFailReason.WouldOrphanAdjacentFloor => CannotDestroyOrphanFloor,
+            DestroyFailReason.HasFloorOnPillar => CannotDestroyFloorOnPillar,
+            DestroyFailReason.HasPillarOnFloor => CannotDestroyPillarOnFloor,
             _ => CannotDestroy,
         };
 

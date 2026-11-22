@@ -5,7 +5,7 @@ namespace LOGIYGames.SurvivalBuilding
 {
     /// <summary>
     /// Floor placement rules, support propagation and ground-anchor detection.
-    /// Floor pieces occupy one cell and may support adjacent floors, walls and stairs.
+    /// Floor pieces occupy one cell and may support adjacent floors, walls, stairs and corner pillars.
     /// </summary>
     [CreateAssetMenu(menuName = "Building/Floor")]
     public class FloorPiece : PieceDefinition
@@ -21,6 +21,10 @@ namespace LOGIYGames.SurvivalBuilding
 
         /// <inheritdoc/>
         public override bool CanStartNewGrid => true;
+
+        /// <inheritdoc/>
+        public override bool IsSupportAnchor(PieceKey key, BuildGrid grid)
+            => IsOnGround(key.Anchor, grid);
 
         /// <inheritdoc/>
         public override bool IsSupportAnchor(PieceKey key, BuildGrid grid)
@@ -248,6 +252,15 @@ namespace LOGIYGames.SurvivalBuilding
                     return DestroyFailReason.HasWallOnFloor;
             }
 
+            for (var corner = 0; corner < 4; corner++)
+            {
+                if (grid.TryGetPieceAtSlot(Slot.Corner(key.Anchor, corner), out var pillar)
+                    && pillar.Definition is PillarPiece)
+                {
+                    return DestroyFailReason.HasPillarOnFloor;
+                }
+            }
+
             return DestroyFailReason.WouldOrphanAdjacentFloor;
         }
 
@@ -285,6 +298,17 @@ namespace LOGIYGames.SurvivalBuilding
 
             if (grid.TryGetPieceAtSlot(Slot.StairSlot(cell), out var stair))
                 yield return stair;
+
+            // A corner pillar is supported by the four floor tiles meeting beneath it.
+            for (var corner = 0; corner < 4; corner++)
+            {
+                if (grid.TryGetPieceAtSlot(Slot.Corner(cell, corner), out var pillar)
+                    && pillar.Definition is PillarPiece pillarDefinition
+                    && pillarDefinition.HasFourFloorIntersection(pillar.Key, grid))
+                {
+                    yield return pillar;
+                }
+            }
         }
 
         /// <summary>Determines whether a floor cell is supported directly or indirectly by a nearby anchor.</summary>
@@ -356,7 +380,9 @@ namespace LOGIYGames.SurvivalBuilding
                 if (piece == null || !piece.IsInGrid || piece.Definition == null)
                     continue;
 
-                if (piece.Definition is WallPiece || piece.Definition is StairPiece)
+                if (piece.Definition is WallPiece
+                    || piece.Definition is StairPiece
+                    || piece.Definition is PillarPiece)
                     return true;
             }
 
