@@ -29,3 +29,7 @@ The package manifest targets Unity `6000.6`. Falling building fragments use Unit
 ## Placement marker raycasts
 
 The sample marker prefabs use **trigger colliders**. `ExampleBuildController` queries marker triggers explicitly with `QueryTriggerInteraction.Collide` before querying solid world geometry, then forwards the marker hit to `BuildPlanner.Tick`. A custom input controller must also allow trigger hits; using `QueryTriggerInteraction.Ignore` bypasses marker-based placement for walls, stairs, and supported floor locations.
+
+### Corner pillars
+
+The Starter Pack includes a pillar definition. It can be placed only at a corner shared by four floor tiles. Its four upper neighbouring cells become valid floor candidates; those floors participate in the same support graph as floors supported by walls. Removing a pillar is blocked while any upper floor would lose its support.
