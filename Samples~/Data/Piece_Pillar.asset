@@ -14,12 +14,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: LOGIYGames.SurvivalBuilding.Samples::PillarPiece
   PieceId: 5
   DisplayName: Pillar
-  SurfaceRequirementText: "Колонна ставится только на пересечении четырёх плит пола"
+  SurfaceRequirementText: "\u041A\u043E\u043B\u043E\u043D\u043D\u0430 \u0441\u0442\u0430\u0432\u0438\u0442\u0441\u044F \u0442\u043E\u043B\u044C\u043A\u043E \u043D\u0430 \u043F\u0435\u0440\u0435\u0441\u0435\u0447\u0435\u043D\u0438\u0438 \u0447\u0435\u0442\u044B\u0440\u0451\u0445 \u043F\u043B\u0438\u0442 \u043F\u043E\u043B\u0430"
   MarkerPrefab: {fileID: 200100000, guid: a8c2e64bfb624d6ea08b4d6f9c9a24dc, type: 3}
   Variants:
   - Material: {fileID: 11400000, guid: d5b3819e8b18a5e46af16de111c04d89, type: 2}
-    Prefab: {fileID: 100100000, guid: c4c3c15f5d2d41a8b452c45b75e1e091, type: 3}
-    GhostPrefab: {fileID: 100100000, guid: c4c3c15f5d2d41a8b452c45b75e1e091, type: 3}
+    Prefab: {fileID: 3670084659076155646, guid: 89f221a31ef7c65499d9dd05b002a09f, type: 3}
+    GhostPrefab: {fileID: 200100000, guid: d1696d88938ec5041bac3e74f773bd7b, type: 3}
   - Material: {fileID: 11400000, guid: e422f26ecbc498148ae6b2cc422f0878, type: 2}
-    Prefab: {fileID: 100100000, guid: a935a6f3cb56491abf759dd6bcb9359a, type: 3}
-    GhostPrefab: {fileID: 100100000, guid: a935a6f3cb56491abf759dd6bcb9359a, type: 3}
+    Prefab: {fileID: 3670084659076155646, guid: ee4c392d249eda34f9d0fdd553b2a7ca, type: 3}
+    GhostPrefab: {fileID: 200100000, guid: d1696d88938ec5041bac3e74f773bd7b, type: 3}
