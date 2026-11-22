@@ -172,6 +172,11 @@ namespace LOGIYGames.SurvivalBuilding
             yield return new Vector2Int(key.Anchor.x, key.Anchor.z);
         }
 
+        /// <summary>Indicates whether this placed piece provides a root support anchor for its grid.</summary>
+        /// <param name="key">Logical key of the piece.</param>
+        /// <param name="grid">Grid that owns the piece.</param>
+        public virtual bool IsSupportAnchor(PieceKey key, BuildGrid grid) => false;
+
         /// <summary>Indicates whether this piece type can start a new grid.</summary>
         public virtual bool CanStartNewGrid => false;
 

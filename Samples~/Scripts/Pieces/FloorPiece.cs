@@ -22,6 +22,10 @@ namespace LOGIYGames.SurvivalBuilding
         /// <inheritdoc/>
         public override bool CanStartNewGrid => true;
 
+        /// <inheritdoc/>
+        public override bool IsSupportAnchor(PieceKey key, BuildGrid grid)
+            => IsOnGround(key.Anchor, grid);
+
         /// <summary>Reserves the cell occupied by this floor.</summary>
         /// <param name="key">Floor key.</param>
         public override IEnumerable<Slot> GetSlots(PieceKey key)

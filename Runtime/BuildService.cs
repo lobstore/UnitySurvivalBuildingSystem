@@ -197,7 +197,7 @@ namespace LOGIYGames.SurvivalBuilding
             Destroy(grid.gameObject);
         }
 
-        /// <summary>Finds all pieces that cannot be reached from a ground-supported floor.</summary>
+        /// <summary>Finds all pieces that cannot be reached from a piece-provided support anchor.</summary>
         /// <param name="grid">The grid to inspect.</param>
         /// <returns>The set of unsupported pieces.</returns>
         private HashSet<BuildPiece> FindOrphanedPieces(BuildGrid grid)
@@ -210,7 +210,7 @@ namespace LOGIYGames.SurvivalBuilding
                 if (piece == null || piece.Definition == null)
                     continue;
 
-                if (piece.Definition is FloorPiece floor && floor.IsOnGround(piece.Key.Anchor, grid))
+                if (piece.Definition.IsSupportAnchor(piece.Key, grid))
                 {
                     if (supported.Add(piece))
                         queue.Enqueue(piece);

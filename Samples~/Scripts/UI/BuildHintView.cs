@@ -16,6 +16,48 @@ namespace LOGIYGames.SurvivalBuilding
 
         private Coroutine _disappearCoroutine;
 
+        private BuildPlanner _subscribedPlanner;
+
+        private void OnEnable()
+        {
+            var planner = GetComponentInParent<BuildPlanner>();
+            Subscribe(planner);
+        }
+
+        private void OnDisable()
+        {
+            Subscribe(null);
+        }
+
+        private void Subscribe(BuildPlanner planner)
+        {
+            if (_subscribedPlanner == planner)
+                return;
+
+            if (_subscribedPlanner != null)
+            {
+                _subscribedPlanner.PlacementHintRequested -= Show;
+                _subscribedPlanner.MessageHintRequested -= ShowPlacementMessage;
+                _subscribedPlanner.DestroyHintRequested -= ShowDestroyMessage;
+                _subscribedPlanner.HintHidden -= Hide;
+            }
+
+            _subscribedPlanner = planner;
+            if (_subscribedPlanner == null)
+                return;
+
+            _subscribedPlanner.PlacementHintRequested += Show;
+            _subscribedPlanner.MessageHintRequested += ShowPlacementMessage;
+            _subscribedPlanner.DestroyHintRequested += ShowDestroyMessage;
+            _subscribedPlanner.HintHidden += Hide;
+        }
+
+        private void ShowPlacementMessage(PlacementFailReason reason)
+            => ShowMessage(Messages != null ? Messages.For(reason) : reason.ToString());
+
+        private void ShowDestroyMessage(DestroyFailReason reason)
+            => ShowMessage(Messages != null ? Messages.ForDestroy(reason) : reason.ToString());
+
         /// <summary>Initializes the hint as hidden.</summary>
         private void Start()
         {

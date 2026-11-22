@@ -338,7 +338,7 @@ namespace LOGIYGames.SurvivalBuilding
                 if (pair.Key == removedKey || pair.Value == null || pair.Value.Definition == null)
                     continue;
 
-                if (pair.Value.Definition is FloorPiece floor && floor.IsOnGround(pair.Key.Anchor, this))
+                if (pair.Value.Definition.IsSupportAnchor(pair.Key, this))
                 {
                     if (visited.Add(pair.Key))
                         queue.Enqueue(pair.Key);
