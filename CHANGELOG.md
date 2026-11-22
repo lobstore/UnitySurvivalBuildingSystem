@@ -12,3 +12,9 @@
 
 ## Compatibility fix
 - Restored `BuildMode` as a dedicated public enum so `BuildEvents`, `BuildPlanner`, and input controllers resolve the mode type in the runtime assembly.
+
+
+## FIX3 — placement marker raycasts
+- Fixed marker-based wall, stair and supported-floor placement.
+- Query marker trigger colliders explicitly, independent of `Physics.queriesHitTriggers`.
+- Prefer a nearby marker trigger over its supporting solid surface while still respecting nearer solid occluders.

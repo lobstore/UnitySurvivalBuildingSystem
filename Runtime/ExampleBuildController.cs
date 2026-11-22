@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace LOGIYGames.SurvivalBuilding
 {
@@ -16,6 +17,14 @@ namespace LOGIYGames.SurvivalBuilding
         [Header("Tuning")]
         [Min(0f)] public float MaxDistance = 12f;
         public LayerMask RaycastLayers = ~0;
+
+        [Header("Placement markers")]
+        [Tooltip("Small tolerance in world units that allows a marker trigger to be selected when it overlaps the supporting surface.")]
+        [Min(0f)] public float MarkerSurfaceTolerance = 0.35f;
+
+        // Marker prefabs use trigger colliders. Keep a reusable buffer to detect them even when
+        // Physics.queriesHitTriggers is disabled globally, without allocating a new array each frame.
+        private readonly RaycastHit[] _markerHitBuffer = new RaycastHit[128];
 
         /// <summary>Indicates whether the connected planner currently accepts building input.</summary>
         public bool BuildingEnabled => Planner != null && Planner.Enabled;
@@ -42,7 +51,7 @@ namespace LOGIYGames.SurvivalBuilding
             var screenCenter = new Vector3(Screen.width * 0.5f, Screen.height * 0.5f, 0f);
             var ray = Cam.ScreenPointToRay(screenCenter);
 
-            if (!Physics.Raycast(ray, out var hit, MaxDistance, RaycastLayers, QueryTriggerInteraction.Ignore))
+            if (!TryGetBuildHit(ray, out var hit))
             {
                 Planner.ClearPreview();
                 return;
@@ -57,6 +66,66 @@ namespace LOGIYGames.SurvivalBuilding
                 else
                     Planner.TryCommit();
             }
+        }
+
+
+        /// <summary>
+        /// Finds the nearest placement-marker trigger or solid world surface. Marker prefabs use
+        /// trigger colliders, so they must be queried with <see cref="QueryTriggerInteraction.Collide"/>
+        /// regardless of the project's global trigger-query setting.
+        /// </summary>
+        /// <param name="ray">Camera ray used to select a building target.</param>
+        /// <param name="hit">Selected marker or world hit.</param>
+        /// <returns>True when a marker or solid surface was hit within the configured range.</returns>
+        private bool TryGetBuildHit(Ray ray, out RaycastHit hit)
+        {
+            hit = default;
+            var maxDistance = Mathf.Max(0f, MaxDistance);
+            if (maxDistance <= 0f)
+                return false;
+
+            var physicsScene = gameObject.scene.GetPhysicsScene();
+            var hitCount = physicsScene.Raycast(
+                ray.origin, ray.direction, _markerHitBuffer, maxDistance, ~0, QueryTriggerInteraction.Collide);
+
+            var hasMarkerHit = false;
+            var nearestMarkerDistance = float.MaxValue;
+            var nearestMarkerHit = default(RaycastHit);
+
+            for (var index = 0; index < hitCount; index++)
+            {
+                var candidate = _markerHitBuffer[index];
+                if (candidate.collider == null
+                    || candidate.collider.GetComponentInParent<BuildMarker>() == null
+                    || candidate.distance >= nearestMarkerDistance)
+                {
+                    continue;
+                }
+
+                hasMarkerHit = true;
+                nearestMarkerDistance = candidate.distance;
+                nearestMarkerHit = candidate;
+            }
+
+            var hasWorldHit = physicsScene.Raycast(
+                ray.origin, ray.direction, out var worldHit, maxDistance, RaycastLayers, QueryTriggerInteraction.Ignore);
+
+            // Marker trigger volumes may slightly overlap the floor/wall that supports them.
+            // Prefer the marker in that case, but do not select one hidden behind a nearer solid.
+            if (hasMarkerHit
+                && (!hasWorldHit || nearestMarkerDistance <= worldHit.distance + Mathf.Max(0f, MarkerSurfaceTolerance)))
+            {
+                hit = nearestMarkerHit;
+                return true;
+            }
+
+            if (hasWorldHit)
+            {
+                hit = worldHit;
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>Processes piece, material and orientation shortcuts while in build mode.</summary>

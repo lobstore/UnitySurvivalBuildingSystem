@@ -25,3 +25,10 @@ The original `.meta` GUIDs for every Runtime script, the Runtime folder, package
 - Stair placement now rejects an occupied stair slot at both validation and marker-commit stages.
 - Marker-generated placement results report `NoMaterialVariant` explicitly when the selected material has no prefab.
 - The planner clears stale placement results after selection, orientation and mode changes, and no longer permits commit while in destroy mode.
+
+
+## FIX3 — marker trigger raycasts
+
+The sample marker prefabs use trigger colliders. The previous sample controller explicitly used `QueryTriggerInteraction.Ignore`, which made wall, stair and other marker-based placements impossible: `BuildPlanner.Tick` never received a `BuildMarker` hit. The controller now queries the current scene's `PhysicsScene` with `QueryTriggerInteraction.Collide`, filters those hits to `BuildMarker`, and compares the nearest marker against the nearest solid world hit. This works even when `Physics.queriesHitTriggers` is disabled globally.
+
+If the project uses a custom input controller instead of `ExampleBuildController`, its marker query must also use `QueryTriggerInteraction.Collide` and pass the marker collider's `RaycastHit` to `BuildPlanner.Tick`. A solid-only raycast using `Ignore` will continue to bypass marker-based placement.

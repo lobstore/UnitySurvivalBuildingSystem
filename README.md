@@ -36,3 +36,8 @@ The legacy `UnityEngine.Input` sample controller remains intentionally unchanged
 ## Validation status
 
 Source-level consistency checks are included in this delivery, but an actual Unity Editor import, compile and Play Mode test could not be run in this environment. The package depends on the external assembly GUID references retained in the original `.asmdef`.
+
+
+## Placement marker raycasts
+
+The sample marker prefabs use **trigger colliders**. The supplied `ExampleBuildController` therefore queries marker triggers explicitly with `QueryTriggerInteraction.Collide` before querying solid world geometry. Do not change this marker query to `Ignore`: wall, stair and supported-floor placement is resolved through `BuildMarker` hits. If you provide a custom input controller, make sure its raycast can hit trigger colliders and forwards the marker collider hit to `BuildPlanner.Tick`.
