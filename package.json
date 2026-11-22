@@ -2,6 +2,9 @@
   "name": "com.logiygames.building-survival",
   "version": "1.0.0",
   "displayName": "LOGIYGames SurvivalBuilding",
+  "author": {
+    "name": "LOGIYGames"
+  },
   "description": "Система строительства Survival типа",
   "unity": "2022.4",
   "samples": [
