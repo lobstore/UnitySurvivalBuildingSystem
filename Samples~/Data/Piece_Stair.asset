@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: abe514e59b9420e45b7704ce528c489c, type: 3}
+  m_Name: Piece_Stair
+  m_EditorClassIdentifier: Assembly-CSharp::StairPiece
+  PieceId: 3
+  DisplayName: Stair
+  MarkerPrefab: {fileID: 4797957524214640337, guid: d3164ce636b3b3a4f897d9601629b926, type: 3}
+  Variants:
+  - Material: {fileID: 11400000, guid: d5b3819e8b18a5e46af16de111c04d89, type: 2}
+    Prefab: {fileID: 8100997956773420605, guid: 29c17192df6987a4ab16e5d9e222d92f, type: 3}
+    GhostPrefab: {fileID: 4100033078780010992, guid: 7d95b62a53f7bbc4a99709dbc636006a, type: 3}

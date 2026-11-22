@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c6d65e9fbba4f2b4c8546b6a8e38105e, type: 3}
+  m_Name: Piece_Doorway
+  m_EditorClassIdentifier: Assembly-CSharp::DoorwayPiece
+  PieceId: 4
+  DisplayName: Doorway
+  MarkerPrefab: {fileID: 2767983102902343860, guid: 3862b313e6fa2874f9b31b92cb6172d9, type: 3}
+  Variants:
+  - Material: {fileID: 11400000, guid: d5b3819e8b18a5e46af16de111c04d89, type: 2}
+    Prefab: {fileID: 215255550810068563, guid: a7d4f5a93286d23478dc82a1dc2d4ba5, type: 3}
+    GhostPrefab: {fileID: 2767983102902343860, guid: 497148918f99ffd4d91e300264506a8b, type: 3}
