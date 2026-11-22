@@ -21,6 +21,8 @@ namespace LOGIYGames.SurvivalBuilding
         public BuildCatalog Catalog;
         public BuildHintView Hint;
         public BuildEvents Events;
+        /// <summary>Localized placement and destruction messages displayed by the hint view.</summary>
+        public BuildMessages Messages;
 
         [Header("State")]
         public PieceDefinition CurrentPiece;
